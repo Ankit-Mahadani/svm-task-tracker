@@ -23,10 +23,20 @@
   <!-- User Picker Overlay -->
   <div class="user-picker-overlay" id="user-picker" style="display:none;">
     <div class="user-picker-card">
-      <h2>👋 Welcome to SVM</h2>
+      <h2>Welcome to SVM</h2>
       <p>Select your name to see today's tasks</p>
       <div class="user-picker-grid" id="user-picker-grid">
         <!-- Populated by JS -->
+      </div>
+      <div class="member-actions" id="member-actions">
+        <button class="btn-add-member" id="btn-show-add-member">+ Add Member</button>
+        <button class="btn-remove-member" id="btn-toggle-remove-mode">− Remove Member</button>
+        <button class="btn-dashboard" id="btn-show-dashboard">Dashboard</button>
+      </div>
+      <div class="add-member-form" id="add-member-form" style="display:none;">
+        <input type="text" id="new-member-name" placeholder="Enter name..." autocomplete="off">
+        <button class="btn-primary btn-sm" id="btn-add-member">Add</button>
+        <button class="btn-secondary btn-sm" id="btn-cancel-add-member">Cancel</button>
       </div>
     </div>
   </div>
@@ -47,20 +57,44 @@
         <div class="greeting" id="greeting-text"></div>
       </div>
       <div class="header-right">
-        <button class="header-btn" id="refresh-btn" title="Refresh" aria-label="Refresh tasks">🔄</button>
+        <button class="header-btn" id="theme-toggle" title="Toggle Theme" aria-label="Toggle theme">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="theme-sun"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="theme-moon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+        </button>
+        <button class="header-btn" id="refresh-btn" title="Refresh" aria-label="Refresh tasks">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+        </button>
         <div class="user-avatar" id="user-avatar-btn" title="Switch user" aria-label="Switch user"></div>
       </div>
     </header>
 
     <!-- Error Banner (hidden by default) -->
     <div class="error-banner" id="error-banner" style="display:none;">
-      <span>⚠️</span>
+      <span class="error-icon">!</span>
       <span id="error-text">Could not connect to the server.</span>
       <button class="retry-btn" id="retry-btn">Retry</button>
     </div>
 
     <!-- AI Briefing -->
     <div id="briefing-section" style="display:none;"></div>
+
+    <!-- Controls (Search & Filter) -->
+    <div class="controls-section" id="controls-section" style="display:none;">
+      <div class="search-box">
+        <input type="text" id="task-search" placeholder="Search tasks..." autocomplete="off">
+      </div>
+      <div class="filter-box">
+        <select id="status-filter">
+          <option value="all">All Status</option>
+          <option value="pending">Pending</option>
+          <option value="overdue">Overdue</option>
+          <option value="done">Completed</option>
+        </select>
+      </div>
+    </div>
 
     <!-- Recurring Tasks Section -->
     <div id="recurring-section" style="display:none;"></div>
@@ -73,9 +107,103 @@
 
     <!-- Footer -->
     <footer class="app-footer" id="app-footer" style="display:none;">
-      SVM Task Tracker · Powered by AI ✨
+      SVM Task Tracker · Powered by AI
     </footer>
 
+  </div>
+
+  <!-- Floating Add Task Button -->
+  <button class="fab" id="fab-add" style="display:none;" title="Add task" aria-label="Add new task">+</button>
+
+  <!-- Add Task Modal -->
+  <div class="modal-overlay" id="add-task-modal" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="task-modal-title">New Task</h3>
+        <button class="modal-close" id="modal-close-btn" aria-label="Close">✕</button>
+      </div>
+      <form id="add-task-form">
+        <div class="form-group">
+          <label for="new-task-name">Task Name</label>
+          <input type="text" id="new-task-name" placeholder="e.g. Submit attendance report" required autocomplete="off">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="new-task-type">Type</label>
+            <select id="new-task-type">
+              <option value="one-time">One-Time</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="new-task-date">Due Date</label>
+            <input type="date" id="new-task-date">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="new-task-priority">Priority</label>
+            <select id="new-task-priority">
+              <option value="Low">Low</option>
+              <option value="Medium" selected>Medium</option>
+              <option value="High">High</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="new-task-notes">Notes (optional)</label>
+            <input type="text" id="new-task-notes" placeholder="Any extra details..." autocomplete="off">
+          </div>
+        </div>
+        <button type="submit" class="btn-primary" id="add-task-submit">Add Task</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Delete Confirmation Modal -->
+  <div class="modal-overlay" id="delete-confirm-modal" style="display:none;">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <h3>Delete Task</h3>
+      </div>
+      <p class="modal-body-text" id="delete-task-name">Are you sure?</p>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="delete-cancel-btn">Cancel</button>
+        <button class="btn-danger" id="delete-confirm-btn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Member Confirmation Modal -->
+  <div class="modal-overlay" id="delete-member-modal" style="display:none;">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <h3>Remove Member</h3>
+      </div>
+      <p class="modal-body-text">To remove <strong id="delete-member-target-name"></strong>, type their name below to confirm:</p>
+      <div class="form-group">
+        <input type="text" id="delete-member-confirm-input" placeholder="Type name here..." autocomplete="off">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="delete-member-cancel-btn">Cancel</button>
+        <button class="btn-danger" id="delete-member-confirm-btn" disabled>Remove</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard Modal -->
+  <div class="modal-overlay" id="dashboard-modal" style="display:none;">
+    <div class="modal-card modal-card-lg">
+      <div class="modal-header">
+        <h3>Team Analytics</h3>
+        <button class="modal-close" id="dashboard-close-btn" aria-label="Close">✕</button>
+      </div>
+      <div class="dashboard-content">
+        <div class="dashboard-grid" id="dashboard-grid">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
