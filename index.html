@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="description" content="SVM Task Tracker — Daily task management for the Saraswati Vidya Mandir team. Track tasks, measure performance, and stay on top of your work.">
+  <meta name="theme-color" content="#0a0a1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>SVM Task Tracker</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>">
+</head>
+<body>
+
+  <!-- Loading Screen -->
+  <div class="loading-screen" id="loading-screen">
+    <div class="loading-logo">SVM</div>
+    <div class="loading-spinner"></div>
+  </div>
+
+  <!-- User Picker Overlay -->
+  <div class="user-picker-overlay" id="user-picker" style="display:none;">
+    <div class="user-picker-card">
+      <h2>👋 Welcome to SVM</h2>
+      <p>Select your name to see today's tasks</p>
+      <div class="user-picker-grid" id="user-picker-grid">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div class="toast" id="toast"></div>
+
+  <!-- Confetti Canvas -->
+  <canvas id="confetti-canvas"></canvas>
+
+  <!-- Main App -->
+  <div id="app">
+
+    <!-- Header -->
+    <header class="app-header" id="app-header" style="display:none;">
+      <div class="header-left">
+        <h1>SVM Task Tracker</h1>
+        <div class="greeting" id="greeting-text"></div>
+      </div>
+      <div class="header-right">
+        <button class="header-btn" id="refresh-btn" title="Refresh" aria-label="Refresh tasks">🔄</button>
+        <div class="user-avatar" id="user-avatar-btn" title="Switch user" aria-label="Switch user"></div>
+      </div>
+    </header>
+
+    <!-- Error Banner (hidden by default) -->
+    <div class="error-banner" id="error-banner" style="display:none;">
+      <span>⚠️</span>
+      <span id="error-text">Could not connect to the server.</span>
+      <button class="retry-btn" id="retry-btn">Retry</button>
+    </div>
+
+    <!-- AI Briefing -->
+    <div id="briefing-section" style="display:none;"></div>
+
+    <!-- Recurring Tasks Section -->
+    <div id="recurring-section" style="display:none;"></div>
+
+    <!-- One-Time Tasks Section -->
+    <div id="onetime-section" style="display:none;"></div>
+
+    <!-- Stats Section -->
+    <div id="stats-section" style="display:none;"></div>
+
+    <!-- Footer -->
+    <footer class="app-footer" id="app-footer" style="display:none;">
+      SVM Task Tracker · Powered by AI ✨
+    </footer>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
