@@ -7,14 +7,14 @@
 // =============================================
 const CONFIG = {
   // 🔴 REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec',
-  
+  API_URL: 'https://script.google.com/macros/s/AKfycbxdVgmOTcSqNKO62AIQEsGBYoIw1GAELQ6hoIO7GoV0ckDvdI4yr1G633jGv5sUuYOb/exec',
+
   // Retry settings
   MAX_RETRIES: 2,
   RETRY_DELAY: 1000,
 
   // Demo mode — set to true to use mock data without a backend
-  DEMO_MODE: true,
+  DEMO_MODE: false,
 };
 
 // =============================================
@@ -415,7 +415,7 @@ async function handleTaskComplete(taskId) {
     card.classList.add('done');
     card.querySelector('.task-name').style.textDecoration = 'line-through';
     card.querySelector('.task-name').style.color = 'var(--text-muted)';
-    
+
     // Remove click listener by cloning
     const parent = card.parentNode;
     const clone = card.cloneNode(true);
@@ -538,7 +538,7 @@ function launchConfetti() {
 async function init() {
   // Check for saved user
   const savedUser = localStorage.getItem('svm_user');
-  
+
   try {
     // Load team members
     const teamRes = await apiFetch('getTeam');
