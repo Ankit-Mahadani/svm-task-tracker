@@ -300,7 +300,11 @@ async function handleAuthSubmit(e) {
       showToast('Signed in successfully.');
     }
   } catch (err) {
-    $('auth-error').textContent = err.message || 'Authentication failed.';
+    let msg = err.message || 'Authentication failed.';
+    if (msg.toLowerCase().includes('email not confirmed')) {
+      msg = 'Check your email box and confirm your mail';
+    }
+    $('auth-error').textContent = msg;
     $('auth-error').style.display = 'block';
   } finally {
     btn.disabled = false;
