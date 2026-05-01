@@ -7,21 +7,32 @@
 // =============================================
 const CONFIG = {
   // 🔴 REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbyTJE6VdLVLUz_SeCONZ68HrzWS9Y6ise0aL7Fp3j1Sb90_P_HDn31_wj9fGWxTwHif/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbzKdj5mJ8DEK4zRpO0bDXg35KGDlSrEPXov4po5LOPjmxspeZZK0mIkyhRD171CybYe/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
   RETRY_DELAY: 1000,
+  
+  // Anti-spam settings
+  TASK_COOLDOWN_MS: 60000, // 1 minute between task completions
 
   // Demo mode — set to true to use mock data without a backend
   DEMO_MODE: false,
 };
 
 // =============================================
+// SUPABASE CONFIGURATION
+// =============================================
+const SUPABASE_URL = 'https://ldthpczjhevegwzlxale.supabase.co'; // 🔴 REPLACE THIS with your Supabase URL
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxkdGhwY3pqaGV2ZWd3emx4YWxlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1ODE0MDYsImV4cCI6MjA5MzE1NzQwNn0.ABNCG3DdKz526-n_oODLzFlHoNdBfZ_IFw4MpDDishY'; // 🔴 REPLACE THIS with your Supabase Anon Key
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// =============================================
 // STATE
 // =============================================
 const state = {
   currentUser: null,
+  userRole: 'member', // 'admin' or 'member'
   teamMembers: [],
   tasks: [],
   briefing: null,
@@ -220,147 +231,185 @@ function hideError() {
 // RENDERING
 // =============================================
 function renderUserPicker(members) {
-  const grid = $('user-picker-grid');
-  grid.innerHTML = members
-    .filter(m => m.active)
-    .map(m => `
-      <button class="user-picker-btn" data-user="${m.name}" id="picker-${m.name}">
-        <span class="member-remove-btn" data-remove="${m.name}" title="Remove ${m.name}">✕</span>
-        <div class="avatar">${getInitials(m.name)}</div>
-        ${m.name}
-      </button>
-    `).join('');
-
-  // Bind name clicks (select user)
-  grid.querySelectorAll('.user-picker-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      if (e.target.closest('.member-remove-btn')) return;
-      const user = btn.dataset.user;
-      localStorage.setItem('svm_user', user);
-      $('user-picker').style.display = 'none';
-      initForUser(user);
-    });
-  });
-
-  // Bind remove clicks
-  grid.querySelectorAll('.member-remove-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      showDeleteMemberModal(btn.dataset.remove);
-    });
-  });
-
-  if (isRemoveMode) {
-    grid.classList.add('remove-mode-active');
-  } else {
-    grid.classList.remove('remove-mode-active');
-  }
-
-  $('user-picker').style.display = 'flex';
+  // Logic replaced by auth-overlay
 }
 
 // =============================================
-// MEMBER MANAGEMENT
+// AUTHENTICATION LOGIC
 // =============================================
-let isRemoveMode = false;
+let isSignUp = false;
 
-function toggleRemoveMode() {
-  isRemoveMode = !isRemoveMode;
-  const grid = $('user-picker-grid');
-  const btn = $('btn-toggle-remove-mode');
+function toggleAuthMode() {
+  isSignUp = !isSignUp;
+  $('auth-title').textContent = isSignUp ? 'Create an Account' : 'Welcome to SVM';
+  $('auth-subtitle').textContent = isSignUp ? 'Sign up to manage your tasks' : 'Sign in to manage your tasks';
+  $('auth-submit').textContent = isSignUp ? 'Sign Up' : 'Sign In';
+  $('auth-toggle-text').innerHTML = isSignUp
+    ? `Already have an account? <button type="button" class="btn-link" id="auth-toggle-btn-inner">Sign In</button>`
+    : `Don't have an account? <button type="button" class="btn-link" id="auth-toggle-btn-inner">Sign Up</button>`;
+  const nameGroup = $('auth-name-group');
+  if (nameGroup) nameGroup.style.display = isSignUp ? 'block' : 'none';
+  const forgotGroup = $('auth-forgot-password-group');
+  if (forgotGroup) forgotGroup.style.display = isSignUp ? 'none' : 'block';
+  $('auth-error').style.display = 'none';
 
-  if (isRemoveMode) {
-    grid.classList.add('remove-mode-active');
-    btn.textContent = 'Done Removing';
-    btn.style.borderColor = 'var(--accent-red)';
-    btn.style.background = 'rgba(239, 68, 68, 0.1)';
-  } else {
-    grid.classList.remove('remove-mode-active');
-    btn.textContent = '− Remove Member';
-    btn.style.borderColor = '';
-    btn.style.background = '';
+  $('auth-toggle-btn-inner')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    toggleAuthMode();
+  });
+}
+
+async function handleAuthSubmit(e) {
+  e.preventDefault();
+  const email = $('auth-email').value;
+  const password = $('auth-password').value;
+  const name = $('auth-name')?.value.trim();
+  const btn = $('auth-submit');
+
+  btn.disabled = true;
+  btn.textContent = isSignUp ? 'Signing up...' : 'Signing in...';
+  $('auth-error').style.display = 'none';
+
+  try {
+    if (isSignUp) {
+      if (!name) {
+        throw new Error('Please enter your Full Name.');
+      }
+      const { data, error } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: { data: { role: 'member', name: name } }
+      });
+      if (error) throw error;
+      if (data.user && data.user.identities && data.user.identities.length === 0) {
+        throw new Error('User already exists');
+      }
+      showToast('Signed up successfully! You can now sign in.');
+      toggleAuthMode(); // Switch back to sign in
+    } else {
+      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      showToast('Signed in successfully.');
+    }
+  } catch (err) {
+    $('auth-error').textContent = err.message || 'Authentication failed.';
+    $('auth-error').style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = isSignUp ? 'Sign Up' : 'Sign In';
   }
 }
-function showAddMemberForm() {
-  $('member-actions').style.display = 'none';
-  $('add-member-form').style.display = 'flex';
-  $('new-member-name').value = '';
-  setTimeout(() => $('new-member-name').focus(), 100);
+
+function openResetPasswordModal() {
+  $('reset-password-modal').style.display = 'flex';
+  $('reset-email').value = $('auth-email').value; // Pre-fill if they already typed it
+  $('reset-error').style.display = 'none';
+  setTimeout(() => $('reset-email').focus(), 100);
 }
 
-function hideAddMemberForm() {
-  $('add-member-form').style.display = 'none';
-  $('member-actions').style.display = 'block';
+function closeResetPasswordModal() {
+  $('reset-password-modal').style.display = 'none';
 }
 
-async function handleAddMember() {
-  const name = $('new-member-name').value.trim();
-  if (!name) return;
-
-  // Check if name already exists
-  if (state.teamMembers.some(m => m.name.toLowerCase() === name.toLowerCase())) {
-    showToast('Name already exists', 'error');
+async function handlePasswordReset(e) {
+  e.preventDefault();
+  const email = $('reset-email').value.trim();
+  if (!email) {
+    $('reset-error').textContent = 'Please enter your email.';
+    $('reset-error').style.display = 'block';
     return;
   }
+  
+  const btn = $('reset-submit-btn');
+  const originalText = btn.textContent;
+  btn.textContent = 'Sending...';
+  btn.disabled = true;
+  $('reset-error').style.display = 'none';
 
-  const newMember = { name, role: 'Member', active: true };
-  state.teamMembers.push(newMember);
-  renderUserPicker(state.teamMembers);
-  hideAddMemberForm();
-  showToast(name + ' added.');
-
-  // Sync to backend
   try {
-    await apiFetch('addMember', { name, role: 'Member' }, 'POST');
+    const { error } = await supabaseClient.auth.resetPasswordForEmail(email);
+    if (error) throw error;
+    showToast('Password reset email sent! Check your inbox.');
+    closeResetPasswordModal();
   } catch (err) {
-    console.error('Failed to sync member:', err);
+    $('reset-error').textContent = err.message || 'Failed to send reset email.';
+    $('reset-error').style.display = 'block';
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
   }
 }
 
-let pendingDeleteMemberName = null;
-
-function showDeleteMemberModal(name) {
-  pendingDeleteMemberName = name;
-  $('delete-member-target-name').textContent = name;
-  $('delete-member-confirm-input').value = '';
-  $('delete-member-confirm-btn').disabled = true;
-  $('delete-member-modal').style.display = 'flex';
-  setTimeout(() => $('delete-member-confirm-input').focus(), 100);
+function handleUserSignedOut() {
+  state.currentUser = null;
+  state.userRole = 'member';
+  $('auth-overlay').style.display = 'flex';
+  $('app-header').style.display = 'none';
+  $('app-footer').style.display = 'none';
+  $('fab-add').style.display = 'none';
+  $('task-view-container').style.display = 'none';
+  $('admin-dashboard-container').style.display = 'none';
 }
 
-function hideDeleteMemberModal() {
-  pendingDeleteMemberName = null;
-  $('delete-member-modal').style.display = 'none';
-}
+async function handleUserSignedIn(user) {
+  const normalizedEmail = user.email.toLowerCase();
+  
+  // Show loading state while fetching mapping
+  const btn = $('auth-submit');
+  if (btn) btn.textContent = 'Loading profile...';
 
-function handleMemberConfirmInput(e) {
-  const input = e.target.value.trim();
-  $('delete-member-confirm-btn').disabled = (input.toLowerCase() !== pendingDeleteMemberName?.toLowerCase());
-}
-
-async function confirmDeleteMember() {
-  const name = pendingDeleteMemberName;
-  if (!name) return;
-  hideDeleteMemberModal();
-
-  state.teamMembers = state.teamMembers.filter(m => m.name !== name);
-  renderUserPicker(state.teamMembers);
-  showToast(name + ' removed.');
-
-  // Sync to backend
   try {
-    await apiFetch('removeMember', { name }, 'POST');
-  } catch (err) {
-    console.error('Failed to sync removal:', err);
+    // Dynamically fetch team mapping from Google Sheets backend
+    const res = await apiFetch('getTeam');
+    const team = res.data || [];
+    
+    // Find member by email in the Team sheet
+    const member = team.find(m => m.email && m.email.toLowerCase() === normalizedEmail);
+
+    if (member) {
+      state.currentUser = member.name;
+    } else {
+      // Fallback for new users not yet in sheet
+      const emailName = user.email.split('@')[0];
+      const fallbackName = emailName.charAt(0).toUpperCase() + emailName.slice(1);
+      state.currentUser = user.user_metadata?.name || fallbackName;
+    }
+  } catch(err) {
+    console.error('Failed to fetch dynamic team mapping:', err);
+    // Fallback if API fails
+    const emailName = user.email.split('@')[0];
+    const fallbackName = emailName.charAt(0).toUpperCase() + emailName.slice(1);
+    state.currentUser = user.user_metadata?.name || fallbackName;
+  }
+  
+  if (normalizedEmail === 'admin@saraswatividyamandir.com') {
+    state.userRole = 'admin';
+    state.currentUser = 'Admin';
+  } else {
+    state.userRole = 'member';
+  }
+
+  $('auth-overlay').style.display = 'none';
+
+  if (state.userRole === 'admin') {
+    $('admin-dashboard-container').style.display = 'block';
+    $('task-view-container').style.display = 'none';
+    renderHeader(state.currentUser, false);
+    openDashboard(); // Fetch and render dashboard
+  } else {
+    $('admin-dashboard-container').style.display = 'none';
+    $('task-view-container').style.display = 'block';
+    renderHeader(state.currentUser, false);
+    initForUser(state.currentUser);
   }
 }
 
-function renderHeader(user) {
+function renderHeader(user, showFab = true) {
   $('greeting-text').textContent = `Good ${getTimeOfDay()}, ${user}`;
   $('user-avatar-btn').textContent = getInitials(user);
   $('app-header').style.display = 'flex';
   $('app-footer').style.display = 'block';
-  $('fab-add').style.display = 'flex';
+  $('fab-add').style.display = showFab ? 'flex' : 'none';
 }
 
 function renderBriefing(html) {
@@ -467,6 +516,14 @@ function renderTaskSection(sectionId, icon, title, tasks) {
       showDeleteConfirm(taskId, task ? task.taskName : 'this task');
     });
   });
+
+  // Bind shift button handlers
+  section.querySelectorAll('.task-shift-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openShiftTaskModal(btn.dataset.shiftId);
+    });
+  });
 }
 
 function renderTaskCard(task) {
@@ -492,12 +549,17 @@ function renderTaskCard(task) {
         </div>
       </div>
       <div class="task-actions">
+        ${!isDone ? `<button class="task-shift-btn" data-shift-id="${task.taskId}" title="Shift task" aria-label="Shift task">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+        </button>` : ''}
+        ${state.userRole === 'admin' ? `
         <button class="task-edit-btn" data-edit-id="${task.taskId}" title="Edit task" aria-label="Edit task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
         </button>
         <button class="task-delete-btn" data-delete-id="${task.taskId}" title="Delete task" aria-label="Delete task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
         </button>
+        ` : ''}
       </div>
     </div>
   `;
@@ -562,98 +624,177 @@ function renderStats(stats) {
   });
 }
 
+let currentDashboardScores = [];
+
 async function openDashboard() {
-  const modal = $('dashboard-modal');
   const grid = $('dashboard-grid');
-  modal.style.display = 'flex';
+  $('admin-dashboard-container').style.display = 'block';
   grid.innerHTML = '<div class="loading-spinner" style="margin: 2rem auto;"></div>';
 
   try {
-    const res = await apiFetch('getScores');
-    renderDashboard(res.data);
+    // Fetch both scores and the full team list
+    const [scoresRes, teamRes] = await Promise.all([
+      apiFetch('getScores').catch(() => ({ data: [] })),
+      apiFetch('getTeam').catch(() => ({ data: [] }))
+    ]);
+    
+    const scoresMap = new Map();
+    if (scoresRes && scoresRes.data) {
+      scoresRes.data.forEach(s => scoresMap.set(s.name, s));
+    }
+    
+    const mergedScores = [];
+    if (teamRes && teamRes.data && teamRes.data.length > 0) {
+      teamRes.data.forEach(member => {
+        if (member.active === false) return; // Skip inactive members
+        if (scoresMap.has(member.name)) {
+          mergedScores.push(scoresMap.get(member.name));
+        } else {
+          // Default empty score object for members with no tasks
+          mergedScores.push({
+            name: member.name,
+            tasksAssigned: 0,
+            tasksCompleted: 0,
+            tasksLate: 0,
+            tasksMissed: 0,
+            score: 0,
+            aiSummary: ""
+          });
+        }
+      });
+    } else {
+      // Fallback if getTeam fails or is empty
+      mergedScores.push(...(scoresRes.data || []));
+    }
+
+    currentDashboardScores = mergedScores;
+    renderDashboard(currentDashboardScores);
   } catch (err) {
     grid.innerHTML = `<div class="error-text">Failed to load analytics: ${err.message}</div>`;
   }
 }
 
 function renderDashboard(scores) {
-  const grid = $('dashboard-grid');
+  const gridContainer = $('dashboard-grid');
   if (!scores || scores.length === 0) {
-    grid.innerHTML = '<div class="empty-state">No analytics data available for this week.</div>';
+    gridContainer.innerHTML = '<div class="empty-state">No analytics data available for this week.</div>';
     return;
   }
+
+  // Calculate aggregates
+  let totalAssigned = 0;
+  let totalCompleted = 0;
+  scores.forEach(s => {
+    totalAssigned += (s.tasksAssigned || 0);
+    totalCompleted += (s.tasksCompleted || 0);
+  });
+  const overallRate = totalAssigned > 0 ? Math.round((totalCompleted / totalAssigned) * 100) : 0;
+  const outstanding = totalAssigned - totalCompleted;
+
+  // Build KPI HTML
+  const kpiHTML = `
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-value purple">${scores.length}</div>
+        <div class="kpi-label">Team Members</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value emerald">${overallRate}%</div>
+        <div class="kpi-label">Overall Completion</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value amber">${outstanding}</div>
+        <div class="kpi-label">Outstanding Tasks</div>
+      </div>
+    </div>
+  `;
 
   // Sort by score descending
   const sorted = [...scores].sort((a, b) => (b.score || 0) - (a.score || 0));
 
-  grid.innerHTML = sorted.map((s, index) => {
-    const rank = index + 1;
-    const total = s.tasksAssigned || 0;
-    const compPct = total > 0 ? (s.tasksCompleted || 0) / total * 100 : 0;
-    const latePct = total > 0 ? (s.tasksLate || 0) / total * 100 : 0;
-    const missPct = total > 0 ? (s.tasksMissed || 0) / total * 100 : 0;
+  const top3HTML = sorted.slice(0, 3).map((s, idx) => createDashboardCardHTML(s, idx + 1)).join('');
+  const restHTML = sorted.slice(3).map((s, idx) => createDashboardCardHTML(s, idx + 4)).join('');
 
-    return `
-      <div class="dashboard-card">
-        <div class="dashboard-card-header">
-          <div class="dashboard-rank rank-${rank}">${rank}</div>
-          <div class="avatar avatar-sm">${getInitials(s.name)}</div>
-          <div class="dashboard-card-name">${s.name}</div>
-          <div class="dashboard-card-score">
-            ${s.score || 0}
-            <span class="trend-up" style="font-size: 0.7rem; color: var(--accent-emerald); margin-left: 4px;">↑</span>
-          </div>
-        </div>
-        
-        <div class="dashboard-chart-container">
-          <div class="dashboard-chart-label">
-            <span>Performance</span>
-            <span>${Math.round(compPct)}%</span>
-          </div>
-          <div class="dashboard-bar-bg">
-            <div class="dashboard-bar-fill completed" style="width: ${compPct}%"></div>
-            <div class="dashboard-bar-fill late" style="width: ${latePct}%"></div>
-            <div class="dashboard-bar-fill missed" style="width: ${missPct}%"></div>
-          </div>
-        </div>
+  gridContainer.innerHTML = `
+    ${kpiHTML}
+    ${top3HTML ? `<div class="leaderboard-top3">${top3HTML}</div>` : ''}
+    ${restHTML ? `<div class="dashboard-grid" style="margin-top: var(--space-xl);">${restHTML}</div>` : ''}
+  `;
 
-        <div class="dashboard-stats-row">
-          <span>Assigned Tasks</span>
-          <span class="dashboard-stat-val">${s.tasksAssigned || 0}</span>
-        </div>
-        <div class="dashboard-stats-row">
-          <span>Completed</span>
-          <span class="dashboard-stat-val completed">${s.tasksCompleted || 0}</span>
-        </div>
-        <div class="dashboard-stats-row">
-          <span>Late</span>
-          <span class="dashboard-stat-val late">${s.tasksLate || 0}</span>
-        </div>
-        <div class="dashboard-stats-row">
-          <span>Missed</span>
-          <span class="dashboard-stat-val missed">${s.tasksMissed || 0}</span>
+  // Trigger animation for SVG rings by adding a small delay to set the stroke-dasharray
+  setTimeout(() => {
+    document.querySelectorAll('.circular-fill').forEach(ring => {
+      const target = ring.getAttribute('data-percentage');
+      if (target) {
+        ring.style.strokeDasharray = `${target}, 100`;
+      }
+    });
+  }, 50);
+}
+
+function createDashboardCardHTML(s, rank) {
+  const total = s.tasksAssigned || 0;
+  const comp = s.tasksCompleted || 0;
+  const late = s.tasksLate || 0;
+  const miss = s.tasksMissed || 0;
+  const compPct = total > 0 ? (comp / total * 100) : 0;
+  const rankClass = rank <= 3 ? `rank-${rank}-card` : '';
+
+  return `
+    <div class="dashboard-card ${rankClass}" style="animation-delay: ${0.1 * Math.min(rank, 10)}s">
+      <div class="dashboard-card-header">
+        <div class="dashboard-rank rank-${rank}">${rank}</div>
+        <div class="avatar avatar-sm">${getInitials(s.name)}</div>
+        <div class="dashboard-card-name">${s.name}</div>
+        <button style="background:var(--gradient-purple); border:none; border-radius:4px; color:white; padding:2px 8px; font-size:0.7rem; font-weight:600; cursor:pointer;" onclick="openAddTaskModal('${s.name}')">+ Task</button>
+        <div class="dashboard-card-score">
+          ${s.score || 0}
+          <span class="trend-up" style="font-size: 0.7rem; color: var(--accent-emerald); margin-left: 4px;">↑</span>
         </div>
       </div>
-    `;
-  }).join('');
-
-  // Add Export Button to Modal Header if not already there
-  const header = $('dashboard-modal').querySelector('.modal-header');
-  if (!header.querySelector('.btn-export')) {
-    const exportBtn = document.createElement('button');
-    exportBtn.className = 'btn-export';
-    exportBtn.innerHTML = `
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-      Export CSV
-    `;
-    exportBtn.onclick = () => handleExportCSV(scores);
-    header.insertBefore(exportBtn, $('dashboard-close-btn'));
-  }
+      
+      <div class="circular-chart-container">
+        <svg viewBox="0 0 36 36" class="circular-chart">
+          <path class="circular-bg"
+            d="M18 2.0845
+              a 15.9155 15.9155 0 0 1 0 31.831
+              a 15.9155 15.9155 0 0 1 0 -31.831"
+          />
+          <path class="circular-fill"
+            data-percentage="${compPct}"
+            stroke-dasharray="0, 100"
+            d="M18 2.0845
+              a 15.9155 15.9155 0 0 1 0 31.831
+              a 15.9155 15.9155 0 0 1 0 -31.831"
+          />
+          <text x="18" y="20.35" class="circular-text">${Math.round(compPct)}%</text>
+        </svg>
+        <div class="chart-stats-info">
+          <div class="dashboard-stats-row">
+            <span>Completed</span>
+            <span class="dashboard-stat-val completed">${comp}</span>
+          </div>
+          <div class="dashboard-stats-row">
+            <span>Late</span>
+            <span class="dashboard-stat-val late">${late}</span>
+          </div>
+          <div class="dashboard-stats-row">
+            <span>Missed</span>
+            <span class="dashboard-stat-val missed">${miss}</span>
+          </div>
+        </div>
+      </div>
+      <div class="dashboard-stats-row" style="border-top: 1px solid rgba(255,255,255,0.05); padding-top: 8px;">
+        <span>Total Assigned</span>
+        <span class="dashboard-stat-val">${total}</span>
+      </div>
+    </div>
+  `;
 }
 
 function handleExportCSV(scores) {
   if (!scores || scores.length === 0) return;
-  
+
   const headers = ['Name', 'Score', 'Assigned', 'Completed', 'Late', 'Missed'];
   const rows = scores.map(s => [
     s.name,
@@ -682,18 +823,50 @@ function closeDashboard() {
 }
 
 function formatTime(dateStr) {
+  if (!dateStr) return '';
   try {
     const d = new Date(dateStr);
-    return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-  } catch { return ''; }
+    if (isNaN(d.getTime())) return dateStr;
+    
+    const hours = d.getHours();
+    const minutes = d.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const h12 = hours % 12 || 12;
+    const mStr = String(minutes).padStart(2, '0');
+    const timePart = `${h12}:${mStr} ${ampm}`;
+    
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    
+    if (isToday) {
+      return timePart;
+    } else {
+      const day = String(d.getDate()).padStart(2, '0');
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = months[d.getMonth()];
+      return `${day} ${month}, ${timePart}`;
+    }
+  } catch (err) {
+    return dateStr;
+  }
 }
 
 // =============================================
 // TASK COMPLETION
 // =============================================
+let lastTaskCompleteTime = 0;
+
 async function handleTaskComplete(taskId) {
+  const now = Date.now();
+  if (now - lastTaskCompleteTime < CONFIG.TASK_COOLDOWN_MS) {
+    showToast('Please wait a moment before marking another task as done.', 'error');
+    return;
+  }
+
   const card = document.querySelector(`[data-task-id="${taskId}"]`);
   if (!card || card.classList.contains('done') || card.classList.contains('completing')) return;
+
+  lastTaskCompleteTime = now;
 
   // Optimistic UI update
   card.classList.add('completing');
@@ -836,33 +1009,39 @@ function launchConfetti() {
 // =============================================
 async function init() {
   applyTheme();
-  // Check for saved user
-  const savedUser = localStorage.getItem('svm_user');
+
+  // Set up auth listeners
+  supabaseClient.auth.onAuthStateChange((event, session) => {
+    if (session) {
+      handleUserSignedIn(session.user);
+    } else {
+      handleUserSignedOut();
+    }
+  });
+
+  // Check current session
+  const { data: { session } } = await supabaseClient.auth.getSession();
 
   try {
-    // Load team members
     const teamRes = await apiFetch('getTeam');
     state.teamMembers = teamRes.data;
-
-    // Hide loading
-    $('loading-screen').classList.add('hidden');
-
-    if (savedUser && state.teamMembers.some(m => m.name === savedUser && m.active)) {
-      initForUser(savedUser);
-    } else {
-      localStorage.removeItem('svm_user');
-      renderUserPicker(state.teamMembers);
-    }
   } catch (err) {
-    $('loading-screen').classList.add('hidden');
-    showError('Could not load team data. ' + (err.message || 'Check your connection.'));
+    console.error('Could not load team data:', err);
+  }
+
+  $('loading-screen').classList.add('hidden');
+
+  if (session) {
+    handleUserSignedIn(session.user);
+  } else {
+    handleUserSignedOut();
   }
 }
 
 async function initForUser(user) {
   state.currentUser = user;
   hideError();
-  renderHeader(user);
+  // renderHeader is already called in handleUserSignedIn
 
   // Show briefing skeleton
   renderBriefingSkeleton();
@@ -917,10 +1096,26 @@ function renderEmptyState() {
 // =============================================
 // ADD TASK
 // =============================================
-function openAddTaskModal() {
+function openAddTaskModal(defaultAssignee = null) {
   state.editingTaskId = null;
   $('task-modal-title').textContent = 'New Task';
   $('add-task-submit').textContent = 'Add Task';
+  
+  if (state.userRole === 'admin') {
+    $('admin-assign-group').style.display = 'block';
+    const assignSelect = $('new-task-assigned-to');
+    assignSelect.innerHTML = state.teamMembers.map(m => 
+      `<option value="${m.name}" ${m.name === defaultAssignee ? 'selected' : ''}>${m.name}</option>`
+    ).join('');
+    if (!defaultAssignee && state.teamMembers.length > 0) {
+      assignSelect.value = state.teamMembers[0].name;
+    } else if (defaultAssignee) {
+      assignSelect.value = defaultAssignee;
+    }
+  } else {
+    $('admin-assign-group').style.display = 'none';
+  }
+
   $('add-task-modal').style.display = 'flex';
   $('new-task-date').value = getTodayStr();
   $('new-task-name').value = '';
@@ -967,13 +1162,17 @@ async function handleTaskSubmit(e) {
 
   try {
     const action = isEdit ? 'editTask' : 'addTask';
+    const assignedToUser = (state.userRole === 'admin' && !isEdit) 
+      ? $('new-task-assigned-to').value 
+      : state.currentUser;
+
     const payload = {
       taskName: name,
       taskType: type,
       plannedDate: date,
       notes: notes,
       priority: priority,
-      assignedTo: state.currentUser
+      assignedTo: assignedToUser
     };
     if (isEdit) payload.taskId = state.editingTaskId;
 
@@ -1067,6 +1266,86 @@ async function handleDeleteTask() {
 }
 
 // =============================================
+// SHIFT TASK
+// =============================================
+let pendingShiftTaskId = null;
+
+async function openShiftTaskModal(taskId) {
+  pendingShiftTaskId = taskId;
+  const select = $('shift-task-assignee');
+  select.innerHTML = '<option>Loading...</option>';
+  $('shift-task-modal').style.display = 'flex';
+
+  try {
+    const res = await apiFetch('getTeam');
+    const team = res.data || [];
+    // Show all active members EXCEPT the current user
+    const others = team.filter(m => m.active !== false && m.name !== state.currentUser);
+    
+    if (others.length === 0) {
+      select.innerHTML = '<option disabled>No other team members available</option>';
+      $('shift-confirm-btn').disabled = true;
+    } else {
+      select.innerHTML = others.map(m => `<option value="${m.name}">${m.name}</option>`).join('');
+      $('shift-confirm-btn').disabled = false;
+    }
+  } catch(err) {
+    select.innerHTML = '<option disabled>Error loading team</option>';
+  }
+}
+
+function closeShiftTaskModal() {
+  pendingShiftTaskId = null;
+  $('shift-task-modal').style.display = 'none';
+}
+
+async function handleShiftTaskSubmit() {
+  if (!pendingShiftTaskId) return;
+  const select = $('shift-task-assignee');
+  const newAssignee = select.value;
+  if (!newAssignee) return;
+
+  const taskId = pendingShiftTaskId;
+  const btn = $('shift-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Shifting...';
+
+  try {
+    await apiFetch('shiftTask', {
+      taskId: taskId,
+      fromUser: state.currentUser,
+      toUser: newAssignee
+    }, 'POST');
+
+    // Remove the task from the local UI since it's shifted away
+    state.tasks = state.tasks.filter(t => t.taskId !== taskId);
+    
+    // Remove the card visually
+    const card = document.querySelector(`[data-task-id="${taskId}"]`);
+    if (card) {
+      card.style.transition = 'all 0.3s ease';
+      card.style.transform = 'translateX(-100%)';
+      card.style.opacity = '0';
+      setTimeout(() => card.remove(), 300);
+    }
+
+    setTimeout(() => {
+      updateSectionCounts();
+      if (state.tasks.length === 0) renderEmptyState();
+    }, 350);
+
+    showToast(`Task shifted to ${newAssignee}. 5 point penalty applied.`, 'warning');
+    closeShiftTaskModal();
+  } catch (err) {
+    showToast('Failed to shift task.', 'error');
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Shift Task';
+  }
+}
+
+// =============================================
 // EVENT LISTENERS
 // =============================================
 document.addEventListener('DOMContentLoaded', init);
@@ -1078,9 +1357,9 @@ $('refresh-btn')?.addEventListener('click', () => {
   }
 });
 
-$('user-avatar-btn')?.addEventListener('click', () => {
-  localStorage.removeItem('svm_user');
-  location.reload();
+$('user-avatar-btn')?.addEventListener('click', async () => {
+  await supabaseClient.auth.signOut();
+  showToast('Signed out');
 });
 
 $('retry-btn')?.addEventListener('click', () => {
@@ -1103,29 +1382,135 @@ $('delete-confirm-modal')?.addEventListener('click', (e) => {
   if (e.target === $('delete-confirm-modal')) closeDeleteConfirm();
 });
 
-// Member management
-$('btn-show-add-member')?.addEventListener('click', showAddMemberForm);
-$('btn-add-member')?.addEventListener('click', handleAddMember);
-$('btn-cancel-add-member')?.addEventListener('click', hideAddMemberForm);
-$('new-member-name')?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); handleAddMember(); }
-  if (e.key === 'Escape') hideAddMemberForm();
+// Shift Task confirmation
+$('shift-cancel-btn')?.addEventListener('click', closeShiftTaskModal);
+$('shift-cancel-btn-top')?.addEventListener('click', closeShiftTaskModal);
+$('shift-confirm-btn')?.addEventListener('click', handleShiftTaskSubmit);
+$('shift-task-modal')?.addEventListener('click', (e) => {
+  if (e.target === $('shift-task-modal')) closeShiftTaskModal();
 });
 
-$('btn-toggle-remove-mode')?.addEventListener('click', toggleRemoveMode);
-$('delete-member-confirm-input')?.addEventListener('input', handleMemberConfirmInput);
-$('delete-member-cancel-btn')?.addEventListener('click', hideDeleteMemberModal);
-$('delete-member-confirm-btn')?.addEventListener('click', confirmDeleteMember);
-$('delete-member-modal')?.addEventListener('click', (e) => {
-  if (e.target === $('delete-member-modal')) hideDeleteMemberModal();
+// Authentication
+$('auth-toggle-btn')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  toggleAuthMode();
+});
+$('auth-form')?.addEventListener('submit', handleAuthSubmit);
+$('auth-reset-btn')?.addEventListener('click', openResetPasswordModal);
+$('reset-close-btn')?.addEventListener('click', closeResetPasswordModal);
+$('reset-password-form')?.addEventListener('submit', handlePasswordReset);
+$('reset-password-modal')?.addEventListener('click', (e) => {
+  if (e.target === $('reset-password-modal')) closeResetPasswordModal();
 });
 
 // Dashboard
-$('btn-show-dashboard')?.addEventListener('click', openDashboard);
-$('dashboard-close-btn')?.addEventListener('click', closeDashboard);
-$('dashboard-modal')?.addEventListener('click', (e) => {
-  if (e.target === $('dashboard-modal')) closeDashboard();
-});
+$('btn-export-dashboard')?.addEventListener('click', () => handleExportCSV(currentDashboardScores));
+
+// Bulk Import
+$('btn-import-tasks')?.addEventListener('click', () => $('bulk-upload-file').click());
+$('bulk-upload-file')?.addEventListener('change', handleBulkUpload);
+
+async function handleBulkUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (evt) => {
+    try {
+      const data = new Uint8Array(evt.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const json = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+      if (json.length === 0) {
+        showToast('File is empty', 'error');
+        return;
+      }
+
+      // Map headers dynamically
+      const tasksToUpload = [];
+      for (const row of json) {
+        const getVal = (keyFragments) => {
+          for (const key of Object.keys(row)) {
+            const lowerKey = key.toLowerCase().replace(/[^a-z]/g, '');
+            for (const frag of keyFragments) {
+              if (lowerKey.includes(frag)) return String(row[key]).trim();
+            }
+          }
+          return '';
+        };
+
+        const taskName = getVal(['taskname', 'task', 'name', 'title']);
+        const assignedTo = getVal(['assigned', 'to', 'member', 'person']);
+        if (!taskName || !assignedTo) continue;
+
+        const typeRaw = getVal(['type', 'frequency']);
+        let taskType = 'one-time';
+        if (typeRaw.toLowerCase().includes('daily')) taskType = 'daily';
+        if (typeRaw.toLowerCase().includes('weekly')) taskType = 'weekly';
+
+        const rawDate = getVal(['date', 'due', 'planned']);
+        let plannedDate = getTodayStr();
+        if (rawDate) {
+          const d = new Date(rawDate);
+          if (!isNaN(d.valueOf())) {
+            plannedDate = d.toISOString().split('T')[0];
+          }
+        }
+
+        const priorityRaw = getVal(['priority', 'importance']);
+        let priority = 'Medium';
+        if (priorityRaw.toLowerCase().includes('high')) priority = 'High';
+        if (priorityRaw.toLowerCase().includes('low')) priority = 'Low';
+
+        const notes = getVal(['note', 'description', 'detail']);
+
+        tasksToUpload.push({
+          taskName,
+          taskType,
+          plannedDate,
+          notes,
+          priority,
+          assignedTo
+        });
+      }
+
+      if (tasksToUpload.length === 0) {
+        showToast('No valid tasks found. Need "Task Name" and "Assigned To" columns.', 'error');
+        return;
+      }
+
+      $('bulk-import-overlay').style.display = 'flex';
+      let successCount = 0;
+      let failCount = 0;
+
+      for (let i = 0; i < tasksToUpload.length; i++) {
+        $('bulk-import-status').textContent = `Processing ${i + 1} / ${tasksToUpload.length} tasks...`;
+        try {
+          await apiFetch('addTask', tasksToUpload[i], 'POST');
+          successCount++;
+        } catch (err) {
+          console.error('Row failed:', err);
+          failCount++;
+        }
+      }
+
+      $('bulk-import-overlay').style.display = 'none';
+      showToast(`Import complete! ${successCount} added.`);
+      
+      openDashboard();
+
+    } catch (err) {
+      console.error(err);
+      showToast('Error parsing file', 'error');
+      $('bulk-import-overlay').style.display = 'none';
+    } finally {
+      $('bulk-upload-file').value = '';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
 
 // Theme Toggle
 $('theme-toggle')?.addEventListener('click', toggleTheme);

@@ -11,6 +11,7 @@
   <title>SVM Task Tracker</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -20,24 +21,57 @@
     <div class="loading-spinner"></div>
   </div>
 
-  <!-- User Picker Overlay -->
-  <div class="user-picker-overlay" id="user-picker" style="display:none;">
-    <div class="user-picker-card">
-      <h2>Welcome to SVM</h2>
-      <p>Select your name to see today's tasks</p>
-      <div class="user-picker-grid" id="user-picker-grid">
-        <!-- Populated by JS -->
+  <!-- Auth Overlay -->
+  <div class="auth-overlay" id="auth-overlay" style="display:none;">
+    <div class="auth-card">
+      <h2 id="auth-title">Welcome to SVM</h2>
+      <p id="auth-subtitle">Sign in to manage your tasks</p>
+      
+      <form id="auth-form" class="auth-form">
+        <div class="form-group">
+          <label for="auth-email">Email</label>
+          <input type="email" id="auth-email" placeholder="you@example.com" required autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label for="auth-password">Password</label>
+          <input type="password" id="auth-password" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+        <div style="text-align: right; margin-top: -10px; margin-bottom: var(--space-md);" id="auth-forgot-password-group">
+          <button type="button" class="btn-link" id="auth-reset-btn" style="font-size: 0.8rem;">Forgot Password?</button>
+        </div>
+        <div class="form-group" id="auth-name-group" style="display:none;">
+          <label for="auth-name">Full Name (as in Google Sheet)</label>
+          <input type="text" id="auth-name" placeholder="E.g. Lakshmi" autocomplete="name">
+        </div>
+        
+        <div class="auth-error" id="auth-error" style="display:none;"></div>
+        
+        <button type="submit" class="btn-primary auth-submit-btn" id="auth-submit">Sign In</button>
+      </form>
+      
+      <div class="auth-footer">
+        <p id="auth-toggle-text">Don't have an account? <button class="btn-link" id="auth-toggle-btn">Sign Up</button></p>
       </div>
-      <div class="member-actions" id="member-actions">
-        <button class="btn-add-member" id="btn-show-add-member">+ Add Member</button>
-        <button class="btn-remove-member" id="btn-toggle-remove-mode">− Remove Member</button>
-        <button class="btn-dashboard" id="btn-show-dashboard">Dashboard</button>
+    </div>
+  </div>
+
+  <!-- Reset Password Modal -->
+  <div class="modal-overlay" id="reset-password-modal" style="display:none; z-index: 1000;">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <h3>Reset Password</h3>
+        <button class="modal-close" id="reset-close-btn" aria-label="Close" type="button">✕</button>
       </div>
-      <div class="add-member-form" id="add-member-form" style="display:none;">
-        <input type="text" id="new-member-name" placeholder="Enter name..." autocomplete="off">
-        <button class="btn-primary btn-sm" id="btn-add-member">Add</button>
-        <button class="btn-secondary btn-sm" id="btn-cancel-add-member">Cancel</button>
-      </div>
+      <p class="modal-body-text" style="margin-bottom: var(--space-md);">Enter your email address and we'll send you a link to reset your password.</p>
+      <form id="reset-password-form">
+        <div class="form-group">
+          <input type="email" id="reset-email" placeholder="you@example.com" required autocomplete="email">
+        </div>
+        <div class="auth-error" id="reset-error" style="display:none; margin-bottom: var(--space-md);"></div>
+        <div class="modal-actions">
+          <button type="submit" class="btn-primary" id="reset-submit-btn" style="width: 100%;">Send Reset Link</button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -67,7 +101,7 @@
             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
           </svg>
         </button>
-        <div class="user-avatar" id="user-avatar-btn" title="Switch user" aria-label="Switch user"></div>
+        <div class="user-avatar" id="user-avatar-btn" title="Sign out" aria-label="Sign out"></div>
       </div>
     </header>
 
@@ -78,32 +112,57 @@
       <button class="retry-btn" id="retry-btn">Retry</button>
     </div>
 
-    <!-- AI Briefing -->
-    <div id="briefing-section" style="display:none;"></div>
+    <div id="task-view-container" style="display:none;">
+      <!-- AI Briefing -->
+      <div id="briefing-section" style="display:none;"></div>
 
-    <!-- Controls (Search & Filter) -->
-    <div class="controls-section" id="controls-section" style="display:none;">
-      <div class="search-box">
-        <input type="text" id="task-search" placeholder="Search tasks..." autocomplete="off">
+      <!-- Controls (Search & Filter) -->
+      <div class="controls-section" id="controls-section" style="display:none;">
+        <div class="search-box">
+          <input type="text" id="task-search" placeholder="Search tasks..." autocomplete="off">
+        </div>
+        <div class="filter-box">
+          <select id="status-filter">
+            <option value="all">All Status</option>
+            <option value="pending">Pending</option>
+            <option value="overdue">Overdue</option>
+            <option value="done">Completed</option>
+          </select>
+        </div>
       </div>
-      <div class="filter-box">
-        <select id="status-filter">
-          <option value="all">All Status</option>
-          <option value="pending">Pending</option>
-          <option value="overdue">Overdue</option>
-          <option value="done">Completed</option>
-        </select>
-      </div>
+
+      <!-- Recurring Tasks Section -->
+      <div id="recurring-section" style="display:none;"></div>
+
+      <!-- One-Time Tasks Section -->
+      <div id="onetime-section" style="display:none;"></div>
+
+      <!-- Stats Section -->
+      <div id="stats-section" style="display:none;"></div>
     </div>
 
-    <!-- Recurring Tasks Section -->
-    <div id="recurring-section" style="display:none;"></div>
-
-    <!-- One-Time Tasks Section -->
-    <div id="onetime-section" style="display:none;"></div>
-
-    <!-- Stats Section -->
-    <div id="stats-section" style="display:none;"></div>
+    <!-- Admin Dashboard Section -->
+    <div id="admin-dashboard-container" style="display:none;">
+      <div class="dashboard-content">
+        <div class="dashboard-header-inline" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-md);">
+          <h2 style="font-size:1.2rem; font-weight:700;">Team Analytics</h2>
+          <div style="display:flex; gap:var(--space-sm);">
+            <input type="file" id="bulk-upload-file" accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" style="display:none;">
+            <button class="btn-export" id="btn-import-tasks" style="display:flex; align-items:center; gap:var(--space-xs); background:transparent; border:1px solid var(--border-glass); border-radius:var(--radius-md); padding:var(--space-xs) var(--space-sm); color:var(--text-primary); cursor:pointer; font-size:0.85rem;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+              Import
+            </button>
+            <button class="btn-export" id="btn-export-dashboard" style="display:flex; align-items:center; gap:var(--space-xs); background:transparent; border:1px solid var(--border-glass); border-radius:var(--radius-md); padding:var(--space-xs) var(--space-sm); color:var(--text-primary); cursor:pointer; font-size:0.85rem;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Export
+            </button>
+          </div>
+        </div>
+        <div class="dashboard-grid" id="dashboard-grid">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </div>
 
     <!-- Footer -->
     <footer class="app-footer" id="app-footer" style="display:none;">
@@ -126,6 +185,10 @@
         <div class="form-group">
           <label for="new-task-name">Task Name</label>
           <input type="text" id="new-task-name" placeholder="e.g. Submit attendance report" required autocomplete="off">
+        </div>
+        <div class="form-group" id="admin-assign-group" style="display:none;">
+          <label for="new-task-assigned-to">Assign To</label>
+          <select id="new-task-assigned-to"></select>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -174,6 +237,27 @@
     </div>
   </div>
 
+  <!-- Shift Task Modal -->
+  <div class="modal-overlay" id="shift-task-modal" style="display:none;">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <h3>Shift Task</h3>
+        <button class="modal-close" id="shift-cancel-btn-top" aria-label="Close">✕</button>
+      </div>
+      <p class="modal-body-text" style="font-size: 0.9rem; margin-bottom: var(--space-md); color: var(--text-muted);">
+        Transfer this task to someone else. <strong style="color: var(--danger-color);">You will lose 5 points</strong> as a penalty for shifting it.
+      </p>
+      <div class="form-group">
+        <label for="shift-task-assignee">Assign To</label>
+        <select id="shift-task-assignee"></select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="shift-cancel-btn">Cancel</button>
+        <button class="btn-primary" id="shift-confirm-btn">Shift Task</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Delete Member Confirmation Modal -->
   <div class="modal-overlay" id="delete-member-modal" style="display:none;">
     <div class="modal-card modal-card-sm">
@@ -191,21 +275,19 @@
     </div>
   </div>
 
-  <!-- Dashboard Modal -->
-  <div class="modal-overlay" id="dashboard-modal" style="display:none;">
-    <div class="modal-card modal-card-lg">
-      <div class="modal-header">
-        <h3>Team Analytics</h3>
-        <button class="modal-close" id="dashboard-close-btn" aria-label="Close">✕</button>
-      </div>
-      <div class="dashboard-content">
-        <div class="dashboard-grid" id="dashboard-grid">
-          <!-- Populated by JS -->
-        </div>
-      </div>
+
+
+  <!-- Bulk Import Progress Overlay -->
+  <div class="modal-overlay" id="bulk-import-overlay" style="display:none; z-index: 1000;">
+    <div class="modal-card modal-card-sm" style="text-align:center;">
+      <h3 style="margin-bottom:var(--space-md);">Importing Tasks</h3>
+      <div class="loading-spinner" style="margin: 0 auto var(--space-md) auto;"></div>
+      <p class="modal-body-text" id="bulk-import-status">Processing 0 / 0 tasks...</p>
     </div>
   </div>
 
+  <!-- Supabase JS Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="app.js"></script>
 </body>
 </html>
