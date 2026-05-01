@@ -170,6 +170,15 @@
             </button>
           </div>
         </div>
+        
+        <!-- Performance Trend Chart -->
+        <div class="kpi-card" style="margin-bottom: var(--space-xl); padding: var(--space-lg);">
+          <h3 style="font-size: 0.95rem; margin-bottom: var(--space-md); color: var(--text-muted);">Team Completion Trend</h3>
+          <div style="height: 200px; width: 100%;">
+            <canvas id="performanceChart"></canvas>
+          </div>
+        </div>
+
         <div class="dashboard-grid" id="dashboard-grid">
           <!-- Populated by JS -->
         </div>
@@ -309,6 +318,33 @@
 
 
 
+  <!-- Leave Request Modal -->
+  <div class="modal-overlay" id="leave-modal" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Request Leave</h3>
+        <button class="modal-close" id="leave-close-btn" aria-label="Close" type="button">✕</button>
+      </div>
+      <div class="form-group">
+        <label for="leave-start-date">Start Date</label>
+        <input type="date" id="leave-start-date">
+      </div>
+      <div class="form-group">
+        <label for="leave-end-date">End Date</label>
+        <input type="date" id="leave-end-date">
+      </div>
+      <div class="form-group">
+        <label for="leave-reason">Reason (Optional)</label>
+        <input type="text" id="leave-reason" placeholder="e.g. Family function, Health...">
+      </div>
+      <p class="modal-body-text" style="font-size: 0.75rem; color: var(--accent-amber);">Note: Leave must be approved by Admin to skip task generation.</p>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="leave-cancel-btn">Cancel</button>
+        <button class="btn-primary" id="leave-submit-btn">Submit Request</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Bulk Import Progress Overlay -->
   <div class="modal-overlay" id="bulk-import-overlay" style="display:none; z-index: 1000;">
     <div class="modal-card modal-card-sm" style="text-align:center;">
@@ -318,6 +354,8 @@
     </div>
   </div>
 
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Supabase JS Client -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="app.js"></script>

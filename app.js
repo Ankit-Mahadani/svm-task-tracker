@@ -7,7 +7,7 @@
 // =============================================
 const CONFIG = {
   // 🔴 REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbwyuJZgK2kghCvygUIR69Q3c1OHB0tBXQ4eoWEzDOGWkr-uzeJcqGG-pBIaoHdYh93V/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbyTfA6kov8lGromadbNPE8196HK66I_8TBpAaS546wfptr7iHtemIGau8EUlt5vBLwa/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
@@ -655,6 +655,9 @@ function renderStats(stats) {
           <div class="progress-fill" style="width: 0%"></div>
         </div>
       </div>
+      <div style="margin-top: 15px; display: flex; justify-content: center;">
+        <button class="btn-secondary btn-sm" id="open-leave-modal-btn" style="width: auto; padding: 4px 12px; font-size: 0.75rem;">Request Leave</button>
+      </div>
     </div>
   `;
   section.style.display = 'block';
@@ -668,18 +671,17 @@ function renderStats(stats) {
   });
 }
 
-let currentDashboardScores = [];
-
 async function openDashboard() {
   const grid = $('dashboard-grid');
   $('admin-dashboard-container').style.display = 'block';
   grid.innerHTML = '<div class="loading-spinner" style="margin: 2rem auto;"></div>';
 
   try {
-    // Fetch both scores and the full team list
-    const [scoresRes, teamRes] = await Promise.all([
+    const [scoresRes, teamRes, leavesRes, perfRes] = await Promise.all([
       apiFetch('getScores').catch(() => ({ data: [] })),
-      apiFetch('getTeam').catch(() => ({ data: [] }))
+      apiFetch('getTeam').catch(() => ({ data: [] })),
+      apiFetch('getLeaves').catch(() => ({ data: [] })),
+      apiFetch('getTeamPerformance').catch(() => ({ data: [] }))
     ]);
     
     const scoresMap = new Map();
@@ -691,41 +693,31 @@ async function openDashboard() {
     const pendingMembers = [];
     if (teamRes && teamRes.data && teamRes.data.length > 0) {
       teamRes.data.forEach(member => {
-        if (member.active === false) {
+        if (member.active === false || member.active === 'FALSE') {
           pendingMembers.push(member);
-          return;
-        }
-        if (scoresMap.has(member.name)) {
-          mergedScores.push(scoresMap.get(member.name));
         } else {
-          // Default empty score object for members with no tasks
-          mergedScores.push({
-            name: member.name,
+          const stats = scoresMap.get(member.name) || {
+            weekScore: 0,
             tasksAssigned: 0,
             tasksCompleted: 0,
             tasksLate: 0,
-            tasksMissed: 0,
-            score: 0,
-            aiSummary: ""
-          });
+            tasksMissed: 0
+          };
+          mergedScores.push({ ...member, ...stats });
         }
       });
-    } else {
-      // Fallback if getTeam fails or is empty
-      mergedScores.push(...(scoresRes.data || []));
     }
 
-    currentDashboardScores = mergedScores;
-    renderDashboard(currentDashboardScores, pendingMembers);
+    renderDashboard(mergedScores, pendingMembers, leavesRes.data || [], perfRes.data || []);
   } catch (err) {
-    grid.innerHTML = `<div class="error-text">Failed to load analytics: ${err.message}</div>`;
+    grid.innerHTML = '<div class="empty-state">Failed to load dashboard data.</div>';
   }
 }
 
-function renderDashboard(scores, pendingMembers = []) {
+function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []) {
   const gridContainer = $('dashboard-grid');
   
-  // Pending Approvals Section
+  // 1. Pending Approvals Section
   let pendingHTML = '';
   if (pendingMembers.length > 0) {
     pendingHTML = `
@@ -749,12 +741,48 @@ function renderDashboard(scores, pendingMembers = []) {
     `;
   }
 
+  // 2. Pending Leaves Section
+  const pendingLeaves = leaves.filter(l => l.status === 'pending');
+  let leavesHTML = '';
+  if (pendingLeaves.length > 0) {
+    leavesHTML = `
+      <div class="pending-leaves-section" style="margin-bottom: var(--space-xl);">
+        <h3 class="section-title" style="margin-bottom: var(--space-md); display: flex; align-items: center; gap: 8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3"></path><path d="M16 3v3"></path><path d="M3 10h18"></path><path d="M10 3h4a2 2 0 0 1 2 2v1h-8V5a2 2 0 0 1 2-2z"></path><rect x="3" y="5" width="18" height="14" rx="2"></rect></svg>
+          Leave Requests (${pendingLeaves.length})
+        </h3>
+        <div class="pending-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-md);">
+          ${pendingLeaves.map(l => `
+            <div class="kpi-card" style="padding: var(--space-md);">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <div style="font-weight: 600;">${l.user}</div>
+                <div style="font-size: 0.75rem; color: var(--accent-amber); font-weight: 600;">${l.startDate} to ${l.endDate}</div>
+              </div>
+              <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">${l.reason || 'No reason provided'}</div>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn-primary approve-leave-btn" data-user="${l.user}" data-created="${l.createdAt}" style="padding: 6px 12px; font-size: 0.75rem; background: var(--accent-emerald);">Approve</button>
+                <button class="btn-secondary reject-leave-btn" data-user="${l.user}" data-created="${l.createdAt}" style="padding: 6px 12px; font-size: 0.75rem; color: var(--accent-red);">Reject</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  // 3. Render Chart
+  if (perfData.length > 0) {
+    initChart(perfData);
+  }
+
   if (!scores || scores.length === 0) {
     gridContainer.innerHTML = `
       ${pendingHTML}
+      ${leavesHTML}
       <div class="empty-state">No analytics data available for this week.</div>
     `;
     bindApprovalEvents();
+    bindLeaveApprovalEvents();
     return;
   }
 
@@ -794,12 +822,14 @@ function renderDashboard(scores, pendingMembers = []) {
 
   gridContainer.innerHTML = `
     ${pendingHTML}
+    ${leavesHTML}
     ${kpiHTML}
     ${top3HTML ? `<div class="leaderboard-top3">${top3HTML}</div>` : ''}
     ${restHTML ? `<div class="dashboard-grid" style="margin-top: var(--space-xl);">${restHTML}</div>` : ''}
   `;
 
   bindApprovalEvents();
+  bindLeaveApprovalEvents();
 
   // Trigger animation for SVG rings by adding a small delay to set the stroke-dasharray
   setTimeout(() => {
@@ -1736,3 +1766,141 @@ document.addEventListener('touchend', e => {
     initForUser(state.currentUser);
   }
 }, { passive: true });
+
+// =============================================
+// PERFORMANCE CHARTS
+// =============================================
+let performanceChart = null;
+
+function initChart(perfData) {
+  const canvas = document.getElementById('performanceChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  
+  if (performanceChart) {
+    performanceChart.destroy();
+  }
+  
+  const labels = perfData.map(d => `W${d.week}`);
+  const completionRates = perfData.map(d => d.totalAssigned > 0 ? Math.round((d.totalCompleted / d.totalAssigned) * 100) : 0);
+  
+  performanceChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Team Progress %',
+        data: completionRates,
+        borderColor: '#6366f1',
+        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+        borderWidth: 3,
+        tension: 0.4,
+        fill: true,
+        pointBackgroundColor: '#6366f1',
+        pointRadius: 4,
+        pointHoverRadius: 6
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          callbacks: {
+            label: (ctx) => `Completion: ${ctx.parsed.y}%`
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          max: 100,
+          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          ticks: { color: '#94a3b8', font: { size: 10 } }
+        },
+        x: {
+          grid: { display: false },
+          ticks: { color: '#94a3b8', font: { size: 10 } }
+        }
+      }
+    }
+  });
+}
+
+// =============================================
+// LEAVE MANAGEMENT
+// =============================================
+function openLeaveModal() {
+  const today = new Date().toISOString().split('T')[0];
+  $('leave-start-date').value = today;
+  $('leave-end-date').value = today;
+  $('leave-reason').value = '';
+  $('leave-modal').style.display = 'flex';
+}
+
+function closeLeaveModal() {
+  $('leave-modal').style.display = 'none';
+}
+
+async function handleLeaveSubmit() {
+  const startDate = $('leave-start-date').value;
+  const endDate = $('leave-end-date').value;
+  const reason = $('leave-reason').value.trim();
+
+  if (!startDate || !endDate) {
+    showToast('Please select dates', 'error');
+    return;
+  }
+
+  const btn = $('leave-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  try {
+    await apiFetch('requestLeave', {
+      user: state.currentUser,
+      startDate,
+      endDate,
+      reason
+    }, 'POST');
+    
+    showToast('Leave Submitted Successfully! Admin will review it.');
+    closeLeaveModal();
+  } catch (err) {
+    console.error('Leave submission error:', err);
+    showToast('Submission failed: ' + (err.message || 'Server error'), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Submit Request';
+  }
+}
+
+function bindLeaveApprovalEvents() {
+  document.querySelectorAll('.approve-leave-btn').forEach(btn => {
+    btn.onclick = () => handleLeaveApproval(btn.dataset.user, btn.dataset.created, 'approved');
+  });
+  document.querySelectorAll('.reject-leave-btn').forEach(btn => {
+    btn.onclick = () => handleLeaveApproval(btn.dataset.user, btn.dataset.created, 'rejected');
+  });
+}
+
+async function handleLeaveApproval(user, createdAt, status) {
+  try {
+    await apiFetch('approveLeave', { user, createdAt, status }, 'POST');
+    showToast(`Leave request ${status}`);
+    openDashboard(); // Refresh
+  } catch (err) {
+    showToast('Action failed', 'error');
+  }
+}
+
+// Global listeners for Leave Modal
+document.addEventListener('click', e => {
+  if (e.target.id === 'open-leave-modal-btn') openLeaveModal();
+});
+$('leave-close-btn')?.addEventListener('click', closeLeaveModal);
+$('leave-cancel-btn')?.addEventListener('click', closeLeaveModal);
+$('leave-submit-btn')?.addEventListener('click', handleLeaveSubmit);
