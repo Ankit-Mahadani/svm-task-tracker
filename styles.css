@@ -1264,18 +1264,25 @@ body::before {
 .light-theme .theme-moon { display: block; }
 
 /* ---------- Task Card Action Buttons ---------- */
-.task-edit-btn, .task-shift-btn {
-  background: transparent;
-  border: none;
+.task-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: auto;
+  align-items: center;
+}
+
+.task-edit-btn, .task-shift-btn, .task-comment-btn {
+  background: transparent !important;
+  border: none !important;
   color: var(--text-muted);
   cursor: pointer;
-  padding: var(--space-xs);
+  padding: 4px;
   border-radius: var(--radius-sm);
   transition: all var(--transition-fast);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: var(--space-xs);
 }
 
 .task-edit-btn:hover {
@@ -1286,6 +1293,23 @@ body::before {
 .task-shift-btn:hover {
   background: var(--bg-card);
   color: var(--accent-amber);
+}
+
+.task-comment-btn:hover {
+  background: var(--bg-card);
+  color: var(--accent-emerald);
+}
+
+.comment-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--accent-emerald);
+  background: rgba(16, 185, 129, 0.1);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  margin-left: 4px;
 }
 
 .modal-header {

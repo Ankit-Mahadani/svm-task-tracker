@@ -7,7 +7,7 @@
 // =============================================
 const CONFIG = {
   // 🔴 REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbzKdj5mJ8DEK4zRpO0bDXg35KGDlSrEPXov4po5LOPjmxspeZZK0mIkyhRD171CybYe/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbwyuJZgK2kghCvygUIR69Q3c1OHB0tBXQ4eoWEzDOGWkr-uzeJcqGG-pBIaoHdYh93V/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
@@ -284,7 +284,15 @@ async function handleAuthSubmit(e) {
       if (data.user && data.user.identities && data.user.identities.length === 0) {
         throw new Error('User already exists');
       }
-      showToast('Signed up successfully! You can now sign in.');
+
+      // 🆕 Register in Google Sheet as PENDING
+      try {
+        await apiFetch('registerMember', { name, email }, 'POST');
+      } catch (regErr) {
+        console.error('Failed to register in Sheet:', regErr);
+      }
+
+      showToast('Signed up successfully! Please wait for Admin approval.');
       toggleAuthMode(); // Switch back to sign in
     } else {
       const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
@@ -368,15 +376,34 @@ async function handleUserSignedIn(user) {
 
     if (member) {
       state.currentUser = member.name;
+      // 🆕 Check if approved
+      if (!member.active && normalizedEmail !== 'admin@saraswatividyamandir.com') {
+        $('auth-error').textContent = 'Your account is pending Admin approval. Please try again later.';
+        $('auth-error').style.display = 'block';
+        $('auth-overlay').style.display = 'flex';
+        await supabaseClient.auth.signOut();
+        return;
+      }
     } else {
-      // Fallback for new users not yet in sheet
+      // If not found in sheet at all, and not admin
+      if (normalizedEmail !== 'admin@saraswatividyamandir.com') {
+         $('auth-error').textContent = 'Access denied. Please contact the Admin.';
+         $('auth-error').style.display = 'block';
+         $('auth-overlay').style.display = 'flex';
+         await supabaseClient.auth.signOut();
+         return;
+      }
+      
       const emailName = user.email.split('@')[0];
       const fallbackName = emailName.charAt(0).toUpperCase() + emailName.slice(1);
       state.currentUser = user.user_metadata?.name || fallbackName;
     }
   } catch(err) {
     console.error('Failed to fetch dynamic team mapping:', err);
-    // Fallback if API fails
+    if (normalizedEmail !== 'admin@saraswatividyamandir.com') {
+       await supabaseClient.auth.signOut();
+       return;
+    }
     const emailName = user.email.split('@')[0];
     const fallbackName = emailName.charAt(0).toUpperCase() + emailName.slice(1);
     state.currentUser = user.user_metadata?.name || fallbackName;
@@ -524,6 +551,14 @@ function renderTaskSection(sectionId, icon, title, tasks) {
       openShiftTaskModal(btn.dataset.shiftId);
     });
   });
+
+  // Bind comment button handlers
+  section.querySelectorAll('.task-comment-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openCommentsModal(btn.dataset.commentId);
+    });
+  });
 }
 
 function renderTaskCard(task) {
@@ -546,9 +581,18 @@ function renderTaskCard(task) {
           <span class="priority-badge ${prioClass}">${task.priority || 'Medium'}</span>
           ${isOverdue ? '<span class="task-badge badge-overdue">overdue</span>' : ''}
           ${isDone && task.completedDate ? `<span>Done at ${formatTime(task.completedDate)}</span>` : ''}
+          ${task.comments && task.comments.length > 0 ? `
+            <span class="comment-indicator" title="${task.comments.length} comments">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 1 1-7.6-13.5 8.38 8.38 0 0 1 3.8.9L21 3z"></path></svg>
+              ${task.comments.length}
+            </span>
+          ` : ''}
         </div>
       </div>
       <div class="task-actions">
+        <button class="task-comment-btn" data-comment-id="${task.taskId}" title="Comments" aria-label="Task comments">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 1 1-7.6-13.5 8.38 8.38 0 0 1 3.8.9L21 3z"></path></svg>
+        </button>
         ${!isDone ? `<button class="task-shift-btn" data-shift-id="${task.taskId}" title="Shift task" aria-label="Shift task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
         </button>` : ''}
@@ -644,9 +688,13 @@ async function openDashboard() {
     }
     
     const mergedScores = [];
+    const pendingMembers = [];
     if (teamRes && teamRes.data && teamRes.data.length > 0) {
       teamRes.data.forEach(member => {
-        if (member.active === false) return; // Skip inactive members
+        if (member.active === false) {
+          pendingMembers.push(member);
+          return;
+        }
         if (scoresMap.has(member.name)) {
           mergedScores.push(scoresMap.get(member.name));
         } else {
@@ -668,16 +716,45 @@ async function openDashboard() {
     }
 
     currentDashboardScores = mergedScores;
-    renderDashboard(currentDashboardScores);
+    renderDashboard(currentDashboardScores, pendingMembers);
   } catch (err) {
     grid.innerHTML = `<div class="error-text">Failed to load analytics: ${err.message}</div>`;
   }
 }
 
-function renderDashboard(scores) {
+function renderDashboard(scores, pendingMembers = []) {
   const gridContainer = $('dashboard-grid');
+  
+  // Pending Approvals Section
+  let pendingHTML = '';
+  if (pendingMembers.length > 0) {
+    pendingHTML = `
+      <div class="pending-approvals-section" style="margin-bottom: var(--space-xl);">
+        <h3 class="section-title" style="margin-bottom: var(--space-md); display: flex; align-items: center; gap: 8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
+          Pending Approvals (${pendingMembers.length})
+        </h3>
+        <div class="pending-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-md);">
+          ${pendingMembers.map(m => `
+            <div class="kpi-card" style="display: flex; justify-content: space-between; align-items: center; padding: var(--space-md);">
+              <div>
+                <div style="font-weight: 600; font-size: 0.95rem;">${m.name}</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted);">${m.email}</div>
+              </div>
+              <button class="btn-primary approve-member-btn" data-email="${m.email}" style="padding: 6px 12px; font-size: 0.75rem; width: auto;">Approve</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
   if (!scores || scores.length === 0) {
-    gridContainer.innerHTML = '<div class="empty-state">No analytics data available for this week.</div>';
+    gridContainer.innerHTML = `
+      ${pendingHTML}
+      <div class="empty-state">No analytics data available for this week.</div>
+    `;
+    bindApprovalEvents();
     return;
   }
 
@@ -716,10 +793,13 @@ function renderDashboard(scores) {
   const restHTML = sorted.slice(3).map((s, idx) => createDashboardCardHTML(s, idx + 4)).join('');
 
   gridContainer.innerHTML = `
+    ${pendingHTML}
     ${kpiHTML}
     ${top3HTML ? `<div class="leaderboard-top3">${top3HTML}</div>` : ''}
     ${restHTML ? `<div class="dashboard-grid" style="margin-top: var(--space-xl);">${restHTML}</div>` : ''}
   `;
+
+  bindApprovalEvents();
 
   // Trigger animation for SVG rings by adding a small delay to set the stroke-dasharray
   setTimeout(() => {
@@ -1299,6 +1379,102 @@ function closeShiftTaskModal() {
   $('shift-task-modal').style.display = 'none';
 }
 
+
+
+// =============================================
+// TASK COMMENTS
+// =============================================
+let activeCommentTaskId = null;
+
+function openCommentsModal(taskId) {
+  const task = state.tasks.find(t => t.taskId === taskId);
+  if (!task) return;
+
+  activeCommentTaskId = taskId;
+  $('comments-task-name').textContent = `Comments: ${task.taskName}`;
+  $('comments-modal').style.display = 'flex';
+  renderComments(task.comments || []);
+  $('new-comment-text').value = '';
+  setTimeout(() => $('new-comment-text').focus(), 100);
+}
+
+function closeCommentsModal() {
+  $('comments-modal').style.display = 'none';
+  activeCommentTaskId = null;
+}
+
+function renderComments(comments) {
+  const list = $('comments-list');
+  if (comments.length === 0) {
+    list.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--text-muted); font-size: 0.85rem;">No comments yet. Start the conversation!</div>';
+    return;
+  }
+
+  list.innerHTML = comments.map(c => `
+    <div style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-glass);">
+      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+        <span style="font-weight: 700; font-size: 0.75rem; color: var(--accent-purple);">${c.user}</span>
+        <span style="font-size: 0.65rem; color: var(--text-muted);">${formatTime(c.timestamp)}</span>
+      </div>
+      <div style="font-size: 0.85rem; line-height: 1.4;">${c.text}</div>
+    </div>
+  `).join('');
+  
+  // Scroll to bottom
+  list.scrollTop = list.scrollHeight;
+}
+
+async function handleCommentSubmit() {
+  const text = $('new-comment-text').value.trim();
+  if (!text || !activeCommentTaskId) return;
+
+  const btn = $('comment-submit-btn');
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  try {
+    await apiFetch('addTaskComment', {
+      taskId: activeCommentTaskId,
+      user: state.currentUser,
+      text: text
+    }, 'POST');
+
+    // Update local state
+    const task = state.tasks.find(t => t.taskId === activeCommentTaskId);
+    if (task) {
+      if (!task.comments) task.comments = [];
+      task.comments.push({
+        user: state.currentUser,
+        text: text,
+        timestamp: new Date().toISOString()
+      });
+      renderComments(task.comments);
+      
+      // Update the card visually (the bubble count)
+      const card = document.querySelector(`[data-task-id="${activeCommentTaskId}"]`);
+      if (card) {
+        // Just re-render the whole list for simplicity or find the indicator
+        renderTasks(state.tasks);
+      }
+    }
+    
+    $('new-comment-text').value = '';
+    $('new-comment-text').focus();
+  } catch (err) {
+    showToast('Failed to post comment', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+}
+
+// Event Listeners for Comments
+$('comments-close-btn')?.addEventListener('click', closeCommentsModal);
+$('comment-submit-btn')?.addEventListener('click', handleCommentSubmit);
+$('new-comment-text')?.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') handleCommentSubmit();
+});
+
 async function handleShiftTaskSubmit() {
   if (!pendingShiftTaskId) return;
   const select = $('shift-task-assignee');
@@ -1525,6 +1701,30 @@ $('status-filter')?.addEventListener('change', (e) => {
   state.filters.status = e.target.value;
   renderTasks(state.tasks);
 });
+
+// Approval Logic
+function bindApprovalEvents() {
+  document.querySelectorAll('.approve-member-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const email = btn.dataset.email;
+      btn.disabled = true;
+      btn.textContent = 'Approving...';
+      try {
+        await handleApproveMember(email);
+        showToast('Member approved successfully!');
+        openDashboard(); // Refresh
+      } catch (err) {
+        showToast('Failed to approve member: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Approve';
+      }
+    });
+  });
+}
+
+async function handleApproveMember(email) {
+  return apiFetch('approveMember', { email }, 'POST');
+}
 
 // Pull-to-refresh (simple)
 let touchStartY = 0;
