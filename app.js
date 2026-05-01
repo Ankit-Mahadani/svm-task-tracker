@@ -7,7 +7,7 @@
 // =============================================
 const CONFIG = {
   // 🔴 REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbyTfA6kov8lGromadbNPE8196HK66I_8TBpAaS546wfptr7iHtemIGau8EUlt5vBLwa/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbwbC_2yZL_fRGdLGkgj2lMVGxeO1mKDR4I_uvt34U_a5e6P5kyRNDzLynDVhihIO3Ro/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
@@ -426,9 +426,11 @@ async function handleUserSignedIn(user) {
   } else {
     $('admin-dashboard-container').style.display = 'none';
     $('task-view-container').style.display = 'block';
-    renderHeader(state.currentUser, false);
     initForUser(state.currentUser);
   }
+
+  // Check for any urgent announcements
+  checkBroadcast();
 }
 
 function renderHeader(user, showFab = true) {
@@ -855,8 +857,7 @@ function createDashboardCardHTML(s, rank) {
       <div class="dashboard-card-header">
         <div class="dashboard-rank rank-${rank}">${rank}</div>
         <div class="avatar avatar-sm">${getInitials(s.name)}</div>
-        <div class="dashboard-card-name">${s.name}</div>
-        <button style="background:var(--gradient-purple); border:none; border-radius:4px; color:white; padding:2px 8px; font-size:0.7rem; font-weight:600; cursor:pointer;" onclick="openAddTaskModal('${s.name}')">+ Task</button>
+        <div class="dashboard-card-name" onclick="openMemberActions('${s.name}')" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; flex:1;">${s.name}</div>
         <div class="dashboard-card-score">
           ${s.score || 0}
           <span class="trend-up" style="font-size: 0.7rem; color: var(--accent-emerald); margin-left: 4px;">↑</span>
@@ -1904,3 +1905,190 @@ document.addEventListener('click', e => {
 $('leave-close-btn')?.addEventListener('click', closeLeaveModal);
 $('leave-cancel-btn')?.addEventListener('click', closeLeaveModal);
 $('leave-submit-btn')?.addEventListener('click', handleLeaveSubmit);
+
+// =============================================
+// BROADCAST SYSTEM
+// =============================================
+async function checkBroadcast() {
+  try {
+    const res = await apiFetch('getLatestBroadcast');
+    if (res.data) {
+      const { message, createdAt } = res.data;
+      const lastDismissed = localStorage.getItem('last_broadcast_dismissed');
+      
+      if (lastDismissed !== createdAt) {
+        $('broadcast-text').textContent = message;
+        $('broadcast-banner').style.display = 'flex';
+        $('broadcast-close-btn').onclick = () => {
+          $('broadcast-banner').style.display = 'none';
+          localStorage.setItem('last_broadcast_dismissed', createdAt);
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('Broadcast check failed');
+  }
+}
+
+async function handleSendBroadcast() {
+  const msgInput = $('broadcast-input');
+  const msg = msgInput.value.trim();
+  if (!msg) return;
+
+  const btn = $('btn-send-broadcast');
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+
+  try {
+    await apiFetch('sendBroadcast', { message: msg }, 'POST');
+    showToast('Broadcast sent to all users!');
+    msgInput.value = '';
+    
+    // Also show it locally immediately
+    $('broadcast-text').textContent = msg;
+    $('broadcast-banner').style.display = 'flex';
+    $('broadcast-close-btn').onclick = () => {
+      $('broadcast-banner').style.display = 'none';
+    };
+  } catch (e) {
+    showToast('Failed to send broadcast', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send 📢';
+  }
+}
+
+// Bind global events
+document.addEventListener('click', e => {
+  if (e.target.id === 'btn-send-broadcast') handleSendBroadcast();
+  if (e.target.id === 'voice-close-btn') {
+    $('voice-modal').style.display = 'none';
+    if (recognition) recognition.stop();
+  }
+  if (e.target.id === 'btn-confirm-voice-task') confirmVoiceTask();
+  if (e.target.id === 'member-actions-close-btn') $('member-actions-modal').style.display = 'none';
+  if (e.target.id === 'btn-manual-task-member') {
+    $('member-actions-modal').style.display = 'none';
+    openAddTaskModal(selectedMember);
+  }
+  if (e.target.id === 'btn-voice-task-member') {
+    $('member-actions-modal').style.display = 'none';
+    startVoiceAssistant(selectedMember);
+  }
+});
+
+// =============================================
+// MEMBER ACTIONS
+// =============================================
+let selectedMember = null;
+
+function openMemberActions(name) {
+  selectedMember = name;
+  $('member-actions-title').textContent = `${name} Actions`;
+  $('member-actions-modal').style.display = 'flex';
+}
+
+// =============================================
+// AI VOICE ASSISTANT
+// =============================================
+let recognition = null;
+
+function startVoiceAssistant(preSelectedUser = null) {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    showToast('Speech recognition not supported in this browser', 'error');
+    return;
+  }
+
+  selectedMember = preSelectedUser;
+
+  $('voice-modal').style.display = 'flex';
+  $('voice-status').style.display = 'block';
+  $('voice-result').style.display = 'none';
+  $('voice-transcript').textContent = 'Speak now...';
+  $('voice-instruction').textContent = preSelectedUser ? `Assigning task to ${preSelectedUser}...` : 'Listening...';
+
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SpeechRec();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  recognition.onresult = (event) => {
+    let interimTranscript = '';
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        handleVoiceFinalText(event.results[i][0].transcript);
+      } else {
+        interimTranscript += event.results[i][0].transcript;
+        $('voice-transcript').textContent = interimTranscript;
+      }
+    }
+  };
+
+  recognition.onerror = (event) => {
+    $('voice-instruction').textContent = 'Error: ' + event.error;
+  };
+
+  recognition.start();
+}
+
+async function handleVoiceFinalText(text) {
+  $('voice-transcript').textContent = `"${text}"`;
+  $('voice-instruction').textContent = 'AI is processing...';
+  
+  if (recognition) recognition.stop();
+
+  try {
+    const res = await apiFetch('processVoiceTask', { text }, 'POST');
+    if (res.success && res.data) {
+      const task = res.data;
+      $('voice-res-name').value = task.taskName || '';
+      $('voice-res-user').value = selectedMember || task.assignee || '';
+      $('voice-res-date').value = task.date || '';
+      $('voice-res-type').value = task.type || 'one-time';
+      
+      $('voice-status').style.display = 'none';
+      $('voice-result').style.display = 'block';
+    } else {
+      showToast('AI could not parse that task', 'error');
+      $('voice-instruction').textContent = 'Could not parse. Try again?';
+    }
+  } catch (err) {
+    showToast('AI Service Busy', 'error');
+    $('voice-instruction').textContent = 'Error processing text.';
+  }
+}
+
+async function confirmVoiceTask() {
+  const name = $('voice-res-name').value;
+  const user = $('voice-res-user').value;
+  const date = $('voice-res-date').value;
+  const type = $('voice-res-type').value;
+
+  if (!name || !user || !date) {
+    showToast('All fields required', 'error');
+    return;
+  }
+
+  const btn = $('btn-confirm-voice-task');
+  btn.disabled = true;
+  btn.textContent = 'Creating...';
+
+  try {
+    await apiFetch('addTask', {
+      name,
+      user,
+      type,
+      plannedDate: date
+    }, 'POST');
+    
+    showToast('Task created successfully!');
+    $('voice-modal').style.display = 'none';
+    openDashboard(); // Refresh
+  } catch (err) {
+    showToast('Failed to create task', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Create Task';
+  }
+}

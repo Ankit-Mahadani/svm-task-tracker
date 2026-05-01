@@ -117,6 +117,15 @@
       </div>
     </header>
 
+    <!-- Broadcast Banner -->
+    <div id="broadcast-banner" class="broadcast-banner" style="display:none;">
+      <div class="broadcast-content">
+        <span class="broadcast-icon">📢</span>
+        <span id="broadcast-text">Staff meeting today at 2 PM.</span>
+      </div>
+      <button class="broadcast-close" id="broadcast-close-btn">✕</button>
+    </div>
+
     <!-- Error Banner (hidden by default) -->
     <div class="error-banner" id="error-banner" style="display:none;">
       <span class="error-icon">!</span>
@@ -177,6 +186,16 @@
           <div style="height: 200px; width: 100%;">
             <canvas id="performanceChart"></canvas>
           </div>
+        </div>
+        
+        <!-- Broadcast Composer -->
+        <div class="kpi-card" style="margin-bottom: var(--space-xl); padding: var(--space-lg);">
+          <h3 style="font-size: 0.95rem; margin-bottom: var(--space-md); color: var(--text-muted);">Urgent Broadcast</h3>
+          <div style="display:flex; gap:10px;">
+            <input type="text" id="broadcast-input" placeholder="Type an announcement for the whole team..." style="flex:1; padding:10px; border-radius:var(--radius-md); border:1px solid var(--border-glass); background:rgba(255,255,255,0.05); color:var(--text-primary);">
+            <button class="btn-primary" id="btn-send-broadcast" style="width:auto; padding:0 20px;">Send 📢</button>
+          </div>
+          <p style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">This will appear at the top of everyone's screen for 24 hours.</p>
         </div>
 
         <div class="dashboard-grid" id="dashboard-grid">
@@ -359,5 +378,64 @@
   <!-- Supabase JS Client -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="app.js"></script>
+  <!-- Member Actions Modal -->
+  <div class="modal-overlay" id="member-actions-modal" style="display:none;">
+    <div class="modal-card" style="max-width: 350px;">
+      <div class="modal-header">
+        <h3 id="member-actions-title">Member Actions</h3>
+        <button class="modal-close" id="member-actions-close-btn">✕</button>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <button class="btn-primary" id="btn-manual-task-member" style="background:var(--bg-card); border:1px solid var(--border-glass); color:var(--text-primary); margin-top:0;">
+          ✍️ Write Manually
+        </button>
+        <button class="btn-primary" id="btn-voice-task-member" style="margin-top:0;">
+          🎙️ Assign via Mic (AI)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI Voice Modal -->
+  <div class="modal-overlay" id="voice-modal" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>AI Task Assistant</h3>
+        <button class="modal-close" id="voice-close-btn">✕</button>
+      </div>
+      <div id="voice-status" style="text-align:center; margin-bottom:20px;">
+        <div class="pulse-mic" style="font-size:3rem; margin-bottom:10px;">🎙️</div>
+        <p id="voice-instruction">Listening...</p>
+      </div>
+      <div id="voice-transcript" style="font-style:italic; color:var(--text-muted); margin-bottom:20px; text-align:center; min-height:40px; padding:10px; background:rgba(0,0,0,0.1); border-radius:var(--radius-md);"></div>
+      
+      <div id="voice-result" style="display:none; background:rgba(255,255,255,0.05); padding:15px; border-radius:var(--radius-md); border:1px solid var(--border-glass); animation: fadeIn 0.3s ease;">
+        <div class="form-group">
+          <label>Task Name</label>
+          <input type="text" id="voice-res-name">
+        </div>
+        <div class="form-group">
+          <label>Assign To</label>
+          <input type="text" id="voice-res-user">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Date</label>
+            <input type="date" id="voice-res-date">
+          </div>
+          <div class="form-group">
+            <label>Type</label>
+            <select id="voice-res-type">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="one-time">One-Time</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn-primary" id="btn-confirm-voice-task">Create Task</button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
