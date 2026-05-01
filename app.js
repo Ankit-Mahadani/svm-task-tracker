@@ -7,7 +7,7 @@
 // =============================================
 const CONFIG = {
   // 🔴 REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbwbC_2yZL_fRGdLGkgj2lMVGxeO1mKDR4I_uvt34U_a5e6P5kyRNDzLynDVhihIO3Ro/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbxLyW9JQbaxV-fJPGg1Pe7vkr9wI4ZtoOo6nolwRj9b0-NwIRaUGoY5GbLJML3tl7Ue/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
@@ -426,6 +426,7 @@ async function handleUserSignedIn(user) {
   } else {
     $('admin-dashboard-container').style.display = 'none';
     $('task-view-container').style.display = 'block';
+    renderHeader(state.currentUser, true);
     initForUser(state.currentUser);
   }
 
@@ -435,7 +436,6 @@ async function handleUserSignedIn(user) {
 
 function renderHeader(user, showFab = true) {
   $('greeting-text').textContent = `Good ${getTimeOfDay()}, ${user}`;
-  $('user-avatar-btn').textContent = getInitials(user);
   $('app-header').style.display = 'flex';
   $('app-footer').style.display = 'block';
   $('fab-add').style.display = showFab ? 'flex' : 'none';
@@ -563,11 +563,32 @@ function renderTaskSection(sectionId, icon, title, tasks) {
   });
 }
 
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return dateStr;
+  
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  const isTomorrow = date.toDateString() === tomorrow.toDateString();
+
+  if (isToday) return 'Today';
+  if (isTomorrow) return 'Tomorrow';
+  
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 function renderTaskCard(task) {
   const isDone = task.status === 'done';
   const isOverdue = task.status === 'overdue';
   const badgeClass = task.taskType === 'daily' ? 'badge-daily' : task.taskType === 'weekly' ? 'badge-weekly' : 'badge-one-time';
   const prioClass = `priority-${(task.priority || 'Medium').toLowerCase()}`;
+  
+  // Clean priority if it looks like a date (bug fix)
+  let displayPriority = task.priority || 'Medium';
+  if (displayPriority.includes('-') || displayPriority.includes(':')) displayPriority = 'Medium';
 
   return `
     <div class="task-card ${isDone ? 'done' : ''} ${isOverdue ? 'overdue' : ''}" 
@@ -580,7 +601,8 @@ function renderTaskCard(task) {
         <div class="task-name">${task.taskName}</div>
         <div class="task-meta">
           <span class="task-badge ${badgeClass}">${task.taskType}</span>
-          <span class="priority-badge ${prioClass}">${task.priority || 'Medium'}</span>
+          <span class="priority-badge ${prioClass}">${displayPriority}</span>
+          ${task.plannedDate ? `<span class="task-date-text" style="color:var(--text-dim); font-size:0.75rem;">• ${formatDate(task.plannedDate)}</span>` : ''}
           ${isOverdue ? '<span class="task-badge badge-overdue">overdue</span>' : ''}
           ${isDone && task.completedDate ? `<span>Done at ${formatTime(task.completedDate)}</span>` : ''}
           ${task.comments && task.comments.length > 0 ? `
@@ -1564,9 +1586,13 @@ $('refresh-btn')?.addEventListener('click', () => {
   }
 });
 
-$('user-avatar-btn')?.addEventListener('click', async () => {
+$('logout-btn')?.addEventListener('click', async () => {
+  const confirmed = confirm('Are you sure you want to sign out?');
+  if (!confirmed) return;
+  
   await supabaseClient.auth.signOut();
   showToast('Signed out');
+  location.reload(); // Hard refresh to clear state
 });
 
 $('retry-btn')?.addEventListener('click', () => {
