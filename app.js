@@ -7,7 +7,7 @@
 // =============================================
 const CONFIG = {
   // 🔴 REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbzr-0S9V508V2Sdr9b2rMYImmGdTZF_vhDVSg6SN8JWJQ9msbDHc2wWpvW9tJ66nb6A/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbyS9n4-EOPuqbdKw90-NO3eR9mNVxgpsm0NKmYbzF2HvyXy2lJ8AcwlLwM0SOXAfnje/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
@@ -544,7 +544,7 @@ function renderTaskSection(sectionId, icon, title, tasks) {
   });
 }
 
-function formatDate(dateStr) {
+function formatDate(dateStr, timeStr = '') {
   if (!dateStr) return '';
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return dateStr;
@@ -555,10 +555,19 @@ function formatDate(dateStr) {
   tomorrow.setDate(now.getDate() + 1);
   const isTomorrow = date.toDateString() === tomorrow.toDateString();
 
-  if (isToday) return 'Today';
-  if (isTomorrow) return 'Tomorrow';
+  let formattedTime = '';
+  if (timeStr) {
+    const [h, m] = timeStr.split(':');
+    const hh = parseInt(h);
+    const ampm = hh >= 12 ? 'PM' : 'AM';
+    const h12 = hh % 12 || 12;
+    formattedTime = ` at ${h12}:${m} ${ampm}`;
+  }
 
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  if (isToday) return 'Today' + formattedTime;
+  if (isTomorrow) return 'Tomorrow' + formattedTime;
+
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + formattedTime;
 }
 
 function renderTaskCard(task) {
@@ -583,7 +592,7 @@ function renderTaskCard(task) {
         <div class="task-meta">
           <span class="task-badge ${badgeClass}">${task.taskType}</span>
           <span class="priority-badge ${prioClass}">${displayPriority}</span>
-          ${task.plannedDate ? `<span class="task-date-text" style="color:var(--text-dim); font-size:0.75rem;">• ${formatDate(task.plannedDate)}</span>` : ''}
+          ${task.plannedDate ? `<span class="task-date-text" style="color:var(--text-dim); font-size:0.75rem;">• ${formatDate(task.plannedDate, task.time)}</span>` : ''}
           ${isOverdue ? '<span class="task-badge badge-overdue">overdue</span>' : ''}
           ${isDone && task.completedDate ? `<span>Done at ${formatTime(task.completedDate)}</span>` : ''}
           ${task.comments && task.comments.length > 0 ? `
@@ -1184,7 +1193,7 @@ function renderEmptyState() {
       <p>Enjoy your free time or check back later.</p>
     </div>
   `;
-    section.style.display = 'block';
+  section.style.display = 'block';
 }
 
 // =============================================
@@ -1198,7 +1207,9 @@ function openAddTaskModal(defaultAssignee = null) {
 
   // Set default date to today
   $('new-task-date').value = getTodayStr();
+  $('new-task-time').value = '';
   $('planned-date-group').style.display = 'none'; // Default is Daily
+  $('planned-time-group').style.display = 'block';
 
   // Handle type change
   $('new-task-type').onchange = (e) => {
@@ -1264,7 +1275,7 @@ async function handleAddTaskSubmit(e) {
 function loadAssigneeList(defaultAssignee = null) {
   const select = $('new-task-assigned-to');
   if (!select) return;
-  
+
   const populate = (members) => {
     select.innerHTML = members.map(m => `<option value="${m.name}" ${m.name === defaultAssignee ? 'selected' : ''}>${m.name}</option>`).join('');
     if (defaultAssignee) select.value = defaultAssignee;
@@ -1332,8 +1343,12 @@ function openEditTaskModal(taskId) {
   $('new-task-name').value = task.taskName;
   $('new-task-type').value = task.taskType;
   $('new-task-date').value = task.plannedDate;
+  $('new-task-time').value = task.time || '';
   $('new-task-notes').value = task.notes || '';
   $('new-task-priority').value = task.priority || 'Medium';
+
+  // Ensure date group is visible if it's a one-time task
+  $('planned-date-group').style.display = (task.taskType === 'one-time') ? 'block' : 'none';
 }
 
 function closeAddTaskModal() {
@@ -1345,6 +1360,7 @@ async function handleTaskSubmit(e) {
   const name = $('new-task-name').value.trim();
   const type = $('new-task-type').value;
   const date = $('new-task-date').value || getTodayStr();
+  const time = $('new-task-time').value || '';
   const notes = $('new-task-notes').value.trim();
   const priority = $('new-task-priority').value;
 
@@ -1365,6 +1381,7 @@ async function handleTaskSubmit(e) {
       taskName: name,
       taskType: type,
       plannedDate: date,
+      time: time,
       notes: notes,
       priority: priority,
       assignedTo: assignedToUser
@@ -1853,6 +1870,8 @@ async function handleBulkUpload(e) {
           }
         }
 
+        const time = getVal(['time', 'at', 'hour']);
+
         const priorityRaw = getVal(['priority', 'importance']);
         let priority = 'Medium';
         if (priorityRaw.toLowerCase().includes('high')) priority = 'High';
@@ -1864,6 +1883,7 @@ async function handleBulkUpload(e) {
           taskName,
           taskType,
           plannedDate,
+          time,
           notes,
           priority,
           assignedTo
@@ -2241,6 +2261,7 @@ async function handleVoiceFinalText(text) {
       $('voice-res-name').value = task.taskName || '';
       $('voice-res-user').value = selectedMember || task.assignee || '';
       $('voice-res-date').value = task.date || '';
+      $('voice-res-time').value = task.time || '';
       $('voice-res-type').value = task.type || 'one-time';
 
       $('voice-status').style.display = 'none';
@@ -2259,6 +2280,7 @@ async function confirmVoiceTask() {
   const name = $('voice-res-name').value;
   const user = $('voice-res-user').value;
   const date = $('voice-res-date').value;
+  const time = $('voice-res-time').value;
   const type = $('voice-res-type').value;
 
   if (!name || !user || !date) {
@@ -2275,7 +2297,8 @@ async function confirmVoiceTask() {
       taskName: name,
       assignedTo: user,
       taskType: type,
-      plannedDate: date
+      plannedDate: date,
+      time: time
     }, 'POST');
 
     showToast('Task created successfully!');
