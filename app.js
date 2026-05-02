@@ -610,10 +610,11 @@ function renderTaskCard(task) {
         ${!isDone ? `<button class="task-shift-btn" data-shift-id="${task.taskId}" title="Shift task" aria-label="Shift task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
         </button>` : ''}
-        ${(state.userRole === 'admin' || state.userRole === 'coordinator') ? `
+        ${(state.userRole === 'admin' || state.userRole === 'coordinator' || task.assignedTo === state.currentUser) ? `
         <button class="task-edit-btn" data-edit-id="${task.taskId}" title="Edit task" aria-label="Edit task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-        </button>
+        </button>` : ''}
+        ${(state.userRole === 'admin' || state.userRole === 'coordinator') ? `
         <button class="task-delete-btn" data-delete-id="${task.taskId}" title="Delete task" aria-label="Delete task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
         </button>
@@ -1347,6 +1348,14 @@ function openEditTaskModal(taskId) {
   $('new-task-notes').value = task.notes || '';
   $('new-task-priority').value = task.priority || 'Medium';
 
+  // Admin/Coordinator reassignment
+  if (state.userRole === 'admin' || state.userRole === 'coordinator') {
+    $('admin-assign-group').style.display = 'block';
+    $('new-task-assigned-to').value = task.assignedTo;
+  } else {
+    $('admin-assign-group').style.display = 'none';
+  }
+
   // Ensure date group is visible if it's a one-time task
   $('planned-date-group').style.display = (task.taskType === 'one-time') ? 'block' : 'none';
 }
@@ -1373,9 +1382,20 @@ async function handleTaskSubmit(e) {
 
   try {
     const action = isEdit ? 'editTask' : 'addTask';
-    const assignedToUser = ((state.userRole === 'admin' || state.userRole === 'coordinator') && !isEdit)
-      ? $('new-task-assigned-to').value
-      : state.currentUser;
+    
+    let assignedToUser;
+    if (state.userRole === 'admin' || state.userRole === 'coordinator') {
+      // Admins/Coordinators pick from dropdown
+      assignedToUser = $('new-task-assigned-to').value;
+    } else {
+      // Members edit their own tasks or add for themselves
+      if (isEdit) {
+        const task = state.tasks.find(t => t.taskId === state.editingTaskId);
+        assignedToUser = task ? task.assignedTo : state.currentUser;
+      } else {
+        assignedToUser = state.currentUser;
+      }
+    }
 
     const payload = {
       taskName: name,
