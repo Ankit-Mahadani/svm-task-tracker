@@ -7,12 +7,12 @@
 // =============================================
 const CONFIG = {
   // 🔴 REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbxLyW9JQbaxV-fJPGg1Pe7vkr9wI4ZtoOo6nolwRj9b0-NwIRaUGoY5GbLJML3tl7Ue/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbzr-0S9V508V2Sdr9b2rMYImmGdTZF_vhDVSg6SN8JWJQ9msbDHc2wWpvW9tJ66nb6A/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
   RETRY_DELAY: 1000,
-  
+
   // Anti-spam settings
   TASK_COOLDOWN_MS: 60000, // 1 minute between task completions
 
@@ -20,12 +20,7 @@ const CONFIG = {
   DEMO_MODE: false,
 };
 
-// =============================================
-// SUPABASE CONFIGURATION
-// =============================================
-const SUPABASE_URL = 'https://ldthpczjhevegwzlxale.supabase.co'; // 🔴 REPLACE THIS with your Supabase URL
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxkdGhwY3pqaGV2ZWd3emx4YWxlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1ODE0MDYsImV4cCI6MjA5MzE1NzQwNn0.ABNCG3DdKz526-n_oODLzFlHoNdBfZ_IFw4MpDDishY'; // 🔴 REPLACE THIS with your Supabase Anon Key
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// (Supabase removed - Using GSheet Auth)
 
 // =============================================
 // STATE
@@ -275,39 +270,22 @@ async function handleAuthSubmit(e) {
   try {
     if (isSignUp) {
       const role = $('auth-role').value;
-      if (!name) {
-        throw new Error('Please enter your Full Name.');
-      }
-      const { data, error } = await supabaseClient.auth.signUp({
-        email,
-        password,
-        options: { data: { role: role, name: name } }
-      });
-      if (error) throw error;
-      if (data.user && data.user.identities && data.user.identities.length === 0) {
-        throw new Error('User already exists');
-      }
+      if (!name) throw new Error('Please enter your Full Name.');
 
-      // 🆕 Register in Google Sheet as PENDING
-      try {
-        await apiFetch('registerMember', { name, email, role }, 'POST');
-      } catch (regErr) {
-        console.error('Failed to register in Sheet:', regErr);
-      }
+      const res = await apiFetch('signup', { name, email, role, password }, 'POST');
+      if (!res.success) throw new Error(res.error || 'Signup failed');
 
       showToast('Signed up successfully! Please wait for Admin approval.');
       toggleAuthMode(); // Switch back to sign in
     } else {
-      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-      if (error) throw error;
+      const res = await apiFetch('login', { email, password }, 'POST');
+      if (!res.success) throw new Error(res.error || 'Login failed');
+
+      handleUserSignedIn(res.data);
       showToast('Signed in successfully.');
     }
   } catch (err) {
-    let msg = err.message || 'Authentication failed.';
-    if (msg.toLowerCase().includes('email not confirmed')) {
-      msg = 'Check your email box and confirm your mail';
-    }
-    $('auth-error').textContent = msg;
+    $('auth-error').textContent = err.message || 'Authentication failed.';
     $('auth-error').style.display = 'block';
   } finally {
     btn.disabled = false;
@@ -316,39 +294,79 @@ async function handleAuthSubmit(e) {
 }
 
 function openResetPasswordModal() {
+  $('reset-step-1').style.display = 'block';
+  $('reset-step-2').style.display = 'none';
+  $('reset-email').value = $('auth-email').value || '';
+  $('reset-otp').value = '';
+  $('reset-new-password').value = '';
+  $('reset-error-1').style.display = 'none';
+  $('reset-error-2').style.display = 'none';
   $('reset-password-modal').style.display = 'flex';
-  $('reset-email').value = $('auth-email').value; // Pre-fill if they already typed it
-  $('reset-error').style.display = 'none';
-  setTimeout(() => $('reset-email').focus(), 100);
 }
 
 function closeResetPasswordModal() {
   $('reset-password-modal').style.display = 'none';
 }
 
-async function handlePasswordReset(e) {
-  e.preventDefault();
+async function handleSendOTP() {
   const email = $('reset-email').value.trim();
+  const btn = $('btn-send-otp');
+  const errorEl = $('reset-error-1');
+
   if (!email) {
-    $('reset-error').textContent = 'Please enter your email.';
-    $('reset-error').style.display = 'block';
+    errorEl.textContent = 'Please enter your email.';
+    errorEl.style.display = 'block';
     return;
   }
-  
-  const btn = $('reset-submit-btn');
+
   const originalText = btn.textContent;
   btn.textContent = 'Sending...';
   btn.disabled = true;
-  $('reset-error').style.display = 'none';
+  errorEl.style.display = 'none';
 
   try {
-    const { error } = await supabaseClient.auth.resetPasswordForEmail(email);
-    if (error) throw error;
-    showToast('Password reset email sent! Check your inbox.');
+    const res = await apiFetch('sendResetOTP', { email }, 'POST');
+    if (!res.success) throw new Error(res.error);
+
+    showToast(res.message, 'success');
+    $('reset-step-1').style.display = 'none';
+    $('reset-step-2').style.display = 'block';
+  } catch (err) {
+    errorEl.textContent = err.message || 'Failed to send code.';
+    errorEl.style.display = 'block';
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+
+async function handleVerifyAndReset() {
+  const email = $('reset-email').value.trim();
+  const otp = $('reset-otp').value.trim();
+  const newPassword = $('reset-new-password').value.trim();
+  const btn = $('btn-verify-reset');
+  const errorEl = $('reset-error-2');
+
+  if (!otp || !newPassword) {
+    errorEl.textContent = 'OTP and New Password are required.';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  const originalText = btn.textContent;
+  btn.textContent = 'Updating...';
+  btn.disabled = true;
+  errorEl.style.display = 'none';
+
+  try {
+    const res = await apiFetch('verifyAndResetPassword', { email, otp, newPassword }, 'POST');
+    if (!res.success) throw new Error(res.error);
+
+    showToast(res.message, 'success');
     closeResetPasswordModal();
   } catch (err) {
-    $('reset-error').textContent = err.message || 'Failed to send reset email.';
-    $('reset-error').style.display = 'block';
+    errorEl.textContent = err.message || 'Verification failed.';
+    errorEl.style.display = 'block';
   } finally {
     btn.textContent = originalText;
     btn.disabled = false;
@@ -358,6 +376,8 @@ async function handlePasswordReset(e) {
 function handleUserSignedOut() {
   state.currentUser = null;
   state.userRole = 'member';
+  localStorage.removeItem('svm_session');
+
   $('auth-overlay').style.display = 'flex';
   $('app-header').style.display = 'none';
   $('app-footer').style.display = 'none';
@@ -365,79 +385,23 @@ function handleUserSignedOut() {
   $('admin-dashboard-container').style.display = 'none';
 }
 
-async function handleUserSignedIn(user) {
-  const normalizedEmail = user.email.toLowerCase();
-  
-  // Show loading state while fetching mapping
-  const btn = $('auth-submit');
-  if (btn) btn.textContent = 'Loading profile...';
+function handleUserSignedIn(userData) {
+  state.currentUser = userData.name;
+  state.userRole = userData.role.toLowerCase();
 
-  try {
-    // Dynamically fetch team mapping from Google Sheets backend
-    const res = await apiFetch('getTeam');
-    const team = res.data || [];
-    
-    // Find member by email in the Team sheet
-    const member = team.find(m => m.email && m.email.toLowerCase() === normalizedEmail);
-
-    if (member) {
-      state.currentUser = member.name;
-      // Set role from sheet mapping (normalized to lowercase)
-      state.userRole = (member.role || 'member').toLowerCase();
-      
-      // 🆕 Check if approved
-      if (!member.active && normalizedEmail !== 'admin@saraswatividyamandir.com') {
-        $('auth-error').textContent = 'Your account is pending Admin approval. Please try again later.';
-        $('auth-error').style.display = 'block';
-        $('auth-overlay').style.display = 'flex';
-        await supabaseClient.auth.signOut();
-        return;
-      }
-    } else {
-      // If not found in sheet at all, and not admin
-      if (normalizedEmail !== 'admin@saraswatividyamandir.com') {
-         $('auth-error').textContent = 'Access denied. Please contact the Admin.';
-         $('auth-error').style.display = 'block';
-         $('auth-overlay').style.display = 'flex';
-         await supabaseClient.auth.signOut();
-         return;
-      }
-      
-      const emailName = user.email.split('@')[0];
-      const fallbackName = emailName.charAt(0).toUpperCase() + emailName.slice(1);
-      state.currentUser = user.user_metadata?.name || fallbackName;
-      state.userRole = user.user_metadata?.role || 'member';
-    }
-  } catch(err) {
-    console.error('Failed to fetch dynamic team mapping:', err);
-    if (normalizedEmail !== 'admin@saraswatividyamandir.com') {
-       await supabaseClient.auth.signOut();
-       return;
-    }
-    const emailName = user.email.split('@')[0];
-    const fallbackName = emailName.charAt(0).toUpperCase() + emailName.slice(1);
-    state.currentUser = user.user_metadata?.name || fallbackName;
-    state.userRole = 'admin';
-  }
-  
-  if (normalizedEmail === 'admin@saraswatividyamandir.com') {
-    state.userRole = 'admin';
-    state.currentUser = 'Admin';
-  }
+  // Save session
+  localStorage.setItem('svm_session', JSON.stringify(userData));
 
   $('auth-overlay').style.display = 'none';
   $('app-header').style.display = 'flex';
-  $('header-add-task').style.display = 'flex'; // Everyone can add tasks
+  $('header-add-task').style.display = 'flex';
 
   // Admin and Coordinator have access to the navigation tabs
   if (state.userRole === 'admin' || state.userRole === 'coordinator') {
     $('header-nav').style.display = 'flex';
-    
-    // Default to "My Tasks" view for everyone, including coordinators
     state.currentView = 'tasks';
     $('admin-dashboard-container').style.display = 'none';
     $('task-view-container').style.display = 'block';
-    
     renderHeader(state.currentUser);
     initForUser(state.currentUser);
   } else {
@@ -448,9 +412,7 @@ async function handleUserSignedIn(user) {
     initForUser(state.currentUser);
   }
 
-  // Check for any urgent announcements
   checkBroadcast();
-  
   $('loading-screen').classList.add('hidden');
 }
 
@@ -586,7 +548,7 @@ function formatDate(dateStr) {
   if (!dateStr) return '';
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return dateStr;
-  
+
   const now = new Date();
   const isToday = date.toDateString() === now.toDateString();
   const tomorrow = new Date(now);
@@ -595,7 +557,7 @@ function formatDate(dateStr) {
 
   if (isToday) return 'Today';
   if (isTomorrow) return 'Tomorrow';
-  
+
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
@@ -604,7 +566,7 @@ function renderTaskCard(task) {
   const isOverdue = task.status === 'overdue' && task.taskType !== 'daily';
   const badgeClass = task.taskType === 'daily' ? 'badge-daily' : task.taskType === 'weekly' ? 'badge-weekly' : 'badge-one-time';
   const prioClass = `priority-${(task.priority || 'Medium').toLowerCase()}`;
-  
+
   // Clean priority if it looks like a date (bug fix)
   let displayPriority = task.priority || 'Medium';
   if (displayPriority.includes('-') || displayPriority.includes(':')) displayPriority = 'Medium';
@@ -715,32 +677,36 @@ function renderStats(stats) {
 }
 
 async function openDashboard() {
-  const grid = $('dashboard-grid');
-  $('admin-dashboard-container').style.display = 'block';
-  grid.innerHTML = '<div class="loading-spinner" style="margin: 2rem auto;"></div>';
+  state.currentView = 'dashboard';
+  const container = $('admin-dashboard-container');
+  const content = $('dashboard-content');
+
+  if (container) container.style.display = 'block';
+  if (content) content.innerHTML = '<div class="loading-spinner" style="margin: 3rem auto;"></div>';
 
   try {
     const [scoresRes, teamRes, leavesRes, perfRes] = await Promise.all([
-      apiFetch('getScores').catch(() => ({ data: [] })),
-      apiFetch('getTeam').catch(() => ({ data: [] })),
-      apiFetch('getLeaves').catch(() => ({ data: [] })),
-      apiFetch('getTeamPerformance').catch(() => ({ data: [] }))
+      apiFetch('getScores').catch(() => ({ success: true, data: [] })),
+      apiFetch('getTeam').catch(() => ({ success: true, data: [] })),
+      apiFetch('getLeaves').catch(() => ({ success: true, data: [] })),
+      apiFetch('getTeamPerformance').catch(() => ({ success: true, data: [] }))
     ]);
-    
+
     const scoresMap = new Map();
     if (scoresRes && scoresRes.data) {
       scoresRes.data.forEach(s => scoresMap.set(s.name, s));
     }
-    
+
     const mergedScores = [];
     const pendingMembers = [];
-    if (teamRes && teamRes.data && teamRes.data.length > 0) {
+    if (teamRes && teamRes.data) {
       teamRes.data.forEach(member => {
-        if (member.active === false || member.active === 'FALSE') {
+        const isActive = member.active === true || String(member.active).toUpperCase().trim() === 'TRUE';
+        if (!isActive) {
           pendingMembers.push(member);
         } else {
           const stats = scoresMap.get(member.name) || {
-            weekScore: 0,
+            score: 0,
             tasksAssigned: 0,
             tasksCompleted: 0,
             tasksLate: 0,
@@ -753,147 +719,115 @@ async function openDashboard() {
 
     renderDashboard(mergedScores, pendingMembers, leavesRes.data || [], perfRes.data || []);
   } catch (err) {
-    grid.innerHTML = '<div class="empty-state">Failed to load dashboard data.</div>';
+    console.error('Dashboard error:', err);
+    if (content) content.innerHTML = '<div class="empty-state">Failed to load dashboard data. Please try again.</div>';
   }
 }
 
 function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []) {
-  const gridContainer = $('dashboard-grid');
-  
-  // 1. Pending Approvals Section (Admin only)
-  let pendingHTML = '';
-  if (state.userRole === 'admin' && pendingMembers.length > 0) {
-    pendingHTML = `
-      <div class="pending-approvals-section" style="margin-bottom: var(--space-xl);">
-        <h3 class="section-title" style="margin-bottom: var(--space-md); display: flex; align-items: center; gap: 8px;">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
-          Pending Approvals (${pendingMembers.length})
-        </h3>
-        <div class="pending-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-md);">
-          ${pendingMembers.map(m => `
-            <div class="kpi-card" style="display: flex; justify-content: space-between; align-items: center; padding: var(--space-md);">
-              <div>
-                <div style="font-weight: 600; font-size: 0.95rem;">${m.name}</div>
-                <div style="font-size: 0.75rem; color: var(--text-muted);">${m.email}</div>
-              </div>
-              <div style="display: flex; gap: 8px;">
-                <button class="btn-primary approve-member-btn" data-email="${m.email}" style="padding: 6px 12px; font-size: 0.75rem; width: auto; margin: 0;">Approve</button>
-                <button class="btn-secondary reject-member-btn" data-email="${m.email}" style="padding: 6px 12px; font-size: 0.75rem; width: auto; margin: 0; background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2); color: #ef4444;">Reject</button>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `;
-  }
+  const container = $('dashboard-content');
+  if (!container) return;
+  container.innerHTML = '';
 
-  // 2. Pending Leaves Section (Admin only)
-  const pendingLeaves = leaves.filter(l => l.status === 'pending');
-  let leavesHTML = '';
-  if (state.userRole === 'admin' && pendingLeaves.length > 0) {
-    leavesHTML = `
-      <div class="pending-leaves-section" style="margin-bottom: var(--space-xl);">
-        <h3 class="section-title" style="margin-bottom: var(--space-md); display: flex; align-items: center; gap: 8px;">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3"></path><path d="M16 3v3"></path><path d="M3 10h18"></path><path d="M10 3h4a2 2 0 0 1 2 2v1h-8V5a2 2 0 0 1 2-2z"></path><rect x="3" y="5" width="18" height="14" rx="2"></rect></svg>
-          Leave Requests (${pendingLeaves.length})
-        </h3>
-        <div class="pending-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-md);">
-          ${pendingLeaves.map(l => `
-            <div class="kpi-card" style="padding: var(--space-md);">
-              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                <div style="font-weight: 600;">${l.user}</div>
-                <div style="font-size: 0.75rem; color: var(--accent-amber); font-weight: 600;">${l.startDate} to ${l.endDate}</div>
-              </div>
-              <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">${l.reason || 'No reason provided'}</div>
-              <div style="display: flex; gap: 8px;">
-                <button class="btn-primary approve-leave-btn" data-user="${l.user}" data-created="${l.createdAt}" style="padding: 6px 12px; font-size: 0.75rem; background: var(--accent-emerald);">Approve</button>
-                <button class="btn-secondary reject-leave-btn" data-user="${l.user}" data-created="${l.createdAt}" style="padding: 6px 12px; font-size: 0.75rem; color: var(--accent-red);">Reject</button>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `;
-  }
-
-  // 3. Render Chart (Admin only)
-  const trendSection = $('dashboard-trend-section');
-  const broadcastSection = $('dashboard-broadcast-section');
-  
+  // 0. Admin Actions Bar
   if (state.userRole === 'admin') {
-    trendSection.style.display = 'block';
-    broadcastSection.style.display = 'block';
-    if (perfData.length > 0) {
-      initChart(perfData);
-    }
-  } else {
-    trendSection.style.display = 'none';
-    broadcastSection.style.display = 'none';
-  }
-
-  if (!scores || scores.length === 0) {
-    gridContainer.innerHTML = `
-      ${pendingHTML}
-      ${leavesHTML}
-      <div class="empty-state">No analytics data available for this week.</div>
+    const adminActions = document.createElement('div');
+    adminActions.className = 'admin-actions-bar';
+    adminActions.style = 'display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;';
+    adminActions.innerHTML = `
+      <button class="btn-primary" id="btn-generate-recurring">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+        Generate Recurring Tasks
+      </button>
+      <button class="btn-secondary" id="btn-reset-passwords">Reset All Passwords</button>
     `;
-    bindApprovalEvents();
-    bindLeaveApprovalEvents();
-    return;
+    container.appendChild(adminActions);
+    $('btn-generate-recurring')?.addEventListener('click', handleManualGenerateTasks);
+    $('btn-reset-passwords')?.addEventListener('click', handleResetAllPasswords);
   }
 
-  // Calculate aggregates
-  let totalAssigned = 0;
-  let totalCompleted = 0;
-  scores.forEach(s => {
-    totalAssigned += (s.tasksAssigned || 0);
-    totalCompleted += (s.tasksCompleted || 0);
-  });
-  const overallRate = totalAssigned > 0 ? Math.round((totalCompleted / totalAssigned) * 100) : 0;
-  const outstanding = totalAssigned - totalCompleted;
+  // 1. Pending Approvals & Leaves (Admin only)
+  if (state.userRole === 'admin') {
+    const pendingSec = document.createElement('div');
+    pendingSec.className = 'dashboard-section';
 
-  // Build KPI HTML
-  const kpiHTML = `
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-value purple">${scores.length}</div>
-        <div class="kpi-label">Team Members</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-value emerald">${overallRate}%</div>
-        <div class="kpi-label">Overall Completion</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-value amber">${outstanding}</div>
-        <div class="kpi-label">Outstanding Tasks</div>
-      </div>
-    </div>
-  `;
+    let html = '';
+    if (pendingMembers.length > 0) {
+      html += `<h3 style="margin-bottom:15px; font-size:1rem; color:var(--accent-amber);">Pending Approvals (${pendingMembers.length})</h3>
+               <div class="pending-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:15px; margin-bottom:20px;">
+                 ${pendingMembers.map(m => `<div class="kpi-card" style="display:flex; justify-content:space-between; align-items:center; padding:15px;">
+                   <div><div style="font-weight:600;">${m.name}</div><div style="font-size:0.75rem; color:var(--text-muted);">${m.email}</div></div>
+                   <div style="display:flex; gap:8px;"><button class="btn-success btn-sm approve-member-btn" data-email="${m.email}">Approve</button></div>
+                 </div>`).join('')}
+               </div>`;
+    }
 
-  // Sort by score descending
-  const sorted = [...scores].sort((a, b) => (b.score || 0) - (a.score || 0));
+    const pendingLeaves = leaves.filter(l => l.status === 'pending');
+    if (pendingLeaves.length > 0) {
+      html += `<h3 style="margin-bottom:15px; font-size:1rem; color:var(--accent-indigo);">Leave Requests (${pendingLeaves.length})</h3>
+               <div class="pending-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:15px;">
+                 ${pendingLeaves.map(l => `<div class="kpi-card" style="padding:15px;">
+                   <div style="display:flex; justify-content:space-between;"><strong>${l.user}</strong><span style="font-size:0.75rem;">${l.startDate}</span></div>
+                   <div style="font-size:0.85rem; color:var(--text-muted); margin:8px 0;">${l.reason}</div>
+                   <div style="display:flex; gap:8px;"><button class="btn-success btn-sm approve-leave-btn" data-user="${l.user}" data-created="${l.createdAt}">Approve</button></div>
+                 </div>`).join('')}
+               </div>`;
+    }
 
-  const top3HTML = sorted.slice(0, 3).map((s, idx) => createDashboardCardHTML(s, idx + 1)).join('');
-  const restHTML = sorted.slice(3).map((s, idx) => createDashboardCardHTML(s, idx + 4)).join('');
+    if (html) {
+      pendingSec.innerHTML = html;
+      container.appendChild(pendingSec);
+    }
+  }
 
-  gridContainer.innerHTML = `
-    ${pendingHTML}
-    ${leavesHTML}
-    ${kpiHTML}
-    ${top3HTML ? `<div class="leaderboard-top3">${top3HTML}</div>` : ''}
-    ${restHTML ? `<div class="dashboard-grid" style="margin-top: var(--space-xl);">${restHTML}</div>` : ''}
-  `;
+  // 2. KPIs & Performance
+  if (!scores || scores.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No performance data available yet.';
+    container.appendChild(empty);
+  } else {
+    // KPI Row
+    const totalAssigned = scores.reduce((sum, s) => sum + (s.tasksAssigned || 0), 0);
+    const totalComp = scores.reduce((sum, s) => sum + (s.tasksCompleted || 0), 0);
+    const rate = totalAssigned > 0 ? Math.round((totalComp / totalAssigned) * 100) : 0;
+
+    const kpiRow = document.createElement('div');
+    kpiRow.className = 'kpi-grid';
+    kpiRow.innerHTML = `
+      <div class="kpi-card"><div class="kpi-value purple">${scores.length}</div><div class="kpi-label">Team Members</div></div>
+      <div class="kpi-card"><div class="kpi-value emerald">${rate}%</div><div class="kpi-label">Overall Completion</div></div>
+      <div class="kpi-card"><div class="kpi-value amber">${totalAssigned - totalComp}</div><div class="kpi-label">Outstanding Tasks</div></div>
+    `;
+    container.appendChild(kpiRow);
+
+    // Leaderboard
+    const grid = document.createElement('div');
+    grid.className = 'dashboard-grid';
+    grid.style.marginTop = '20px';
+    const sorted = [...scores].sort((a, b) => (b.score || 0) - (a.score || 0));
+    grid.innerHTML = sorted.map((s, idx) => createDashboardCardHTML(s, idx + 1)).join('');
+    container.appendChild(grid);
+  }
+
+  // 3. Trends (Admin only)
+  if (state.userRole === 'admin' && perfData.length > 0) {
+    const trendSec = document.createElement('div');
+    trendSec.className = 'dashboard-section';
+    trendSec.style.marginTop = '30px';
+    trendSec.innerHTML = '<h3>Team Progress Trends</h3><div id="perf-chart" class="trend-chart"></div>';
+    container.appendChild(trendSec);
+    setTimeout(() => initChart(perfData), 100);
+  }
 
   bindApprovalEvents();
   bindLeaveApprovalEvents();
 
-  // Trigger animation for SVG rings by adding a small delay to set the stroke-dasharray
+  // Animation trigger
   setTimeout(() => {
     document.querySelectorAll('.circular-fill').forEach(ring => {
       const target = ring.getAttribute('data-percentage');
-      if (target) {
-        ring.style.strokeDasharray = `${target}, 100`;
-      }
+      if (target) ring.style.strokeDasharray = `${target}, 100`;
     });
   }, 50);
 }
@@ -911,7 +845,7 @@ function createDashboardCardHTML(s, rank) {
       <div class="dashboard-card-header">
         <div class="dashboard-rank rank-${rank}">${rank}</div>
         <div class="avatar avatar-sm">${getInitials(s.name)}</div>
-        <div class="dashboard-card-name" onclick="openMemberActions('${s.name}')" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; flex:1;">${s.name}</div>
+        <div class="dashboard-card-name" onclick="openAddTaskForMember('${s.name}')" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; flex:1;">${s.name}</div>
         <div class="dashboard-card-score">
           ${s.score || 0}
           <span class="trend-up" style="font-size: 0.7rem; color: var(--accent-emerald); margin-left: 4px;">↑</span>
@@ -992,17 +926,17 @@ function formatTime(dateStr) {
   try {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return dateStr;
-    
+
     const hours = d.getHours();
     const minutes = d.getMinutes();
     const ampm = hours >= 12 ? 'PM' : 'AM';
     const h12 = hours % 12 || 12;
     const mStr = String(minutes).padStart(2, '0');
     const timePart = `${h12}:${mStr} ${ampm}`;
-    
+
     const now = new Date();
     const isToday = d.toDateString() === now.toDateString();
-    
+
     if (isToday) {
       return timePart;
     } else {
@@ -1175,18 +1109,6 @@ function launchConfetti() {
 async function init() {
   applyTheme();
 
-  // Set up auth listeners
-  supabaseClient.auth.onAuthStateChange((event, session) => {
-    if (session) {
-      handleUserSignedIn(session.user);
-    } else {
-      handleUserSignedOut();
-    }
-  });
-
-  // Check current session
-  const { data: { session } } = await supabaseClient.auth.getSession();
-
   try {
     const teamRes = await apiFetch('getTeam');
     state.teamMembers = teamRes.data;
@@ -1196,8 +1118,15 @@ async function init() {
 
   $('loading-screen').classList.add('hidden');
 
-  if (session) {
-    handleUserSignedIn(session.user);
+  // Check for local session
+  const savedSession = localStorage.getItem('svm_session');
+  if (savedSession) {
+    try {
+      const userData = JSON.parse(savedSession);
+      handleUserSignedIn(userData);
+    } catch (e) {
+      handleUserSignedOut();
+    }
   } else {
     handleUserSignedOut();
   }
@@ -1255,39 +1184,104 @@ function renderEmptyState() {
       <p>Enjoy your free time or check back later.</p>
     </div>
   `;
-  section.style.display = 'block';
+    section.style.display = 'block';
 }
 
 // =============================================
 // ADD TASK
 // =============================================
 function openAddTaskModal(defaultAssignee = null) {
-  state.editingTaskId = null;
-  $('task-modal-title').textContent = 'New Task';
-  $('add-task-submit').textContent = 'Add Task';
-  
+  const modal = $('add-task-modal');
+  if (!modal) return;
+  $('add-task-form').reset();
+  $('task-modal-title').textContent = defaultAssignee ? `Assign to ${defaultAssignee}` : 'New Task';
+
+  // Set default date to today
+  $('new-task-date').value = getTodayStr();
+  $('planned-date-group').style.display = 'none'; // Default is Daily
+
+  // Handle type change
+  $('new-task-type').onchange = (e) => {
+    const type = e.target.value;
+    // Show date only for one-time tasks
+    $('planned-date-group').style.display = (type === 'one-time') ? 'block' : 'none';
+  };
+
   if (state.userRole === 'admin' || state.userRole === 'coordinator') {
     $('admin-assign-group').style.display = 'block';
-    const assignSelect = $('new-task-assigned-to');
-    assignSelect.innerHTML = state.teamMembers.map(m => 
-      `<option value="${m.name}" ${m.name === defaultAssignee ? 'selected' : ''}>${m.name}</option>`
-    ).join('');
-    if (!defaultAssignee && state.teamMembers.length > 0) {
-      assignSelect.value = state.teamMembers[0].name;
-    } else if (defaultAssignee) {
-      assignSelect.value = defaultAssignee;
-    }
+    loadAssigneeList(defaultAssignee);
   } else {
     $('admin-assign-group').style.display = 'none';
   }
 
-  $('add-task-modal').style.display = 'flex';
-  $('new-task-date').value = getTodayStr();
-  $('new-task-name').value = '';
-  $('new-task-notes').value = '';
-  $('new-task-type').value = 'one-time';
-  $('new-task-priority').value = 'Medium';
-  setTimeout(() => $('new-task-name').focus(), 100);
+  modal.style.display = 'flex';
+}
+
+function openAddTaskForMember(name) {
+  openAddTaskModal(name);
+}
+
+async function handleAddTaskSubmit(e) {
+  e.preventDefault();
+  const name = $('new-task-name').value.trim();
+  const assignedTo = (state.userRole === 'admin' || state.userRole === 'coordinator')
+    ? $('new-task-assigned-to').value
+    : state.currentUser;
+  const type = $('new-task-type').value;
+  const date = (type === 'one-time') ? $('new-task-date').value : getTodayStr();
+
+  if (!name || !assignedTo) {
+    showToast('Please fill all required fields', 'error');
+    return;
+  }
+
+  const btn = $('add-task-submit-btn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Creating...';
+
+  try {
+    const res = await apiFetch('addTask', {
+      taskName: name,
+      assignedTo,
+      taskType: type,
+      plannedDate: date
+    }, 'POST');
+
+    if (!res.success) throw new Error(res.error);
+
+    showToast('Task added successfully!');
+    closeAddTaskModal();
+    initForUser(state.currentUser);
+  } catch (err) {
+    showToast(err.message || 'Failed to add task', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+function loadAssigneeList(defaultAssignee = null) {
+  const select = $('new-task-assigned-to');
+  if (!select) return;
+
+  const populate = (members) => {
+    select.innerHTML = members.map(m => `<option value="${m.name}" ${m.name === defaultAssignee ? 'selected' : ''}>${m.name}</option>`).join('');
+    if (defaultAssignee) select.value = defaultAssignee;
+  };
+
+  // Use state.teamMembers if available, otherwise fetch
+  if (state.teamMembers && state.teamMembers.length > 0) {
+    populate(state.teamMembers);
+  } else {
+    // Fallback to fetching
+    apiFetch('getTeam').then(res => {
+      if (res.success && res.data) {
+        state.teamMembers = res.data;
+        populate(res.data);
+      }
+    });
+  }
 }
 
 function openEditTaskModal(taskId) {
@@ -1327,8 +1321,8 @@ async function handleTaskSubmit(e) {
 
   try {
     const action = isEdit ? 'editTask' : 'addTask';
-    const assignedToUser = ((state.userRole === 'admin' || state.userRole === 'coordinator') && !isEdit) 
-      ? $('new-task-assigned-to').value 
+    const assignedToUser = ((state.userRole === 'admin' || state.userRole === 'coordinator') && !isEdit)
+      ? $('new-task-assigned-to').value
       : state.currentUser;
 
     const payload = {
@@ -1388,6 +1382,45 @@ function closeDeleteConfirm() {
   $('delete-confirm-modal').style.display = 'none';
 }
 
+async function handleManualGenerateTasks() {
+  const btn = $('btn-generate-recurring');
+  const originalText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = 'Generating...';
+
+  try {
+    const res = await apiFetch('generateRecurringTasks', {}, 'POST');
+    if (!res.success) throw new Error(res.error);
+    showToast(res.message || 'Recurring tasks generated for today!');
+    openDashboard(); // Refresh
+  } catch (err) {
+    showToast(err.message || 'Failed to generate tasks.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalText;
+  }
+}
+
+async function handleResetAllPasswords() {
+  if (!confirm('Are you sure you want to reset ALL user passwords to Admin@12345 / Member@12345? This cannot be undone.')) return;
+
+  const btn = $('btn-reset-passwords');
+  const originalText = btn.textContent;
+  btn.textContent = 'Resetting...';
+  btn.disabled = true;
+
+  try {
+    const res = await apiFetch('resetAllPasswords', {}, 'POST');
+    if (!res.success) throw new Error(res.error);
+    showToast('All passwords have been reset to defaults.');
+  } catch (err) {
+    showToast(err.message || 'Failed to reset passwords.', 'error');
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+
 async function handleDeleteTask() {
   if (!pendingDeleteTaskId) return;
   const taskId = pendingDeleteTaskId;
@@ -1437,10 +1470,10 @@ let pendingShiftTaskId = null;
 
 async function openShiftTaskModal(taskId) {
   pendingShiftTaskId = taskId;
-  
+
   const assigneeSelect = $('shift-task-assignee');
   assigneeSelect.innerHTML = '';
-  
+
   // Find current task to exclude current owner
   const task = state.tasks.find(t => t.taskId === taskId);
   const currentOwner = task ? task.assignedTo : '';
@@ -1458,7 +1491,7 @@ async function openShiftTaskModal(taskId) {
     showToast('No other active members available for transfer', 'error');
     return;
   }
-  
+
   $('shift-task-modal').style.display = 'flex';
 }
 
@@ -1507,7 +1540,7 @@ function renderComments(comments) {
       <div style="font-size: 0.85rem; line-height: 1.4;">${c.text}</div>
     </div>
   `).join('');
-  
+
   // Scroll to bottom
   list.scrollTop = list.scrollHeight;
 }
@@ -1537,7 +1570,7 @@ async function handleCommentSubmit() {
         timestamp: new Date().toISOString()
       });
       renderComments(task.comments);
-      
+
       // Update the card visually (the bubble count)
       const card = document.querySelector(`[data-task-id="${activeCommentTaskId}"]`);
       if (card) {
@@ -1545,7 +1578,7 @@ async function handleCommentSubmit() {
         renderTasks(state.tasks);
       }
     }
-    
+
     $('new-comment-text').value = '';
     $('new-comment-text').focus();
   } catch (err) {
@@ -1584,14 +1617,14 @@ async function handleShiftTaskSubmit() {
     // Update local task state (remove from current view as it's no longer yours)
     const taskIdx = state.tasks.findIndex(t => t.taskId === taskId);
     if (taskIdx !== -1) {
-       state.tasks.splice(taskIdx, 1);
-       const card = document.querySelector(`[data-task-id="${taskId}"]`);
-       if (card) {
-         card.style.transition = 'all 0.3s ease';
-         card.style.transform = 'translateX(100%)';
-         card.style.opacity = '0';
-         setTimeout(() => card.remove(), 300);
-       }
+      state.tasks.splice(taskIdx, 1);
+      const card = document.querySelector(`[data-task-id="${taskId}"]`);
+      if (card) {
+        card.style.transition = 'all 0.3s ease';
+        card.style.transform = 'translateX(100%)';
+        card.style.opacity = '0';
+        setTimeout(() => card.remove(), 300);
+      }
     }
 
     setTimeout(() => {
@@ -1622,13 +1655,13 @@ $('refresh-btn')?.addEventListener('click', () => {
   }
 });
 
-$('logout-btn')?.addEventListener('click', async () => {
+$('logout-btn')?.addEventListener('click', () => {
   const confirmed = confirm('Are you sure you want to sign out?');
   if (!confirmed) return;
-  
-  await supabaseClient.auth.signOut();
-  showToast('Signed out');
-  location.reload(); // Hard refresh to clear state
+
+  localStorage.removeItem('svm_session');
+  showToast('Signed out successfully');
+  setTimeout(() => location.reload(), 500); // Small delay for toast
 });
 
 $('retry-btn')?.addEventListener('click', () => {
@@ -1644,11 +1677,11 @@ $('header-add-task')?.addEventListener('click', () => openAddTaskModal());
 async function switchView(view) {
   if (state.currentView === view && view === 'team') return; // Already there
   state.currentView = view;
-  
+
   // 1. Update Tab Highlighting immediately
   const myTasksTab = $('tab-my-tasks');
   const teamTab = $('tab-team');
-  
+
   if (view === 'tasks') {
     myTasksTab?.classList.add('active');
     teamTab?.classList.remove('active');
@@ -1694,13 +1727,42 @@ $('auth-toggle-btn')?.addEventListener('click', (e) => {
 $('auth-form')?.addEventListener('submit', handleAuthSubmit);
 $('auth-reset-btn')?.addEventListener('click', openResetPasswordModal);
 $('reset-close-btn')?.addEventListener('click', closeResetPasswordModal);
-$('reset-password-form')?.addEventListener('submit', handlePasswordReset);
+
+// OTP Reset Listeners
+$('btn-send-otp')?.addEventListener('click', handleSendOTP);
+$('btn-verify-reset')?.addEventListener('click', handleVerifyAndReset);
+$('btn-back-to-step1')?.addEventListener('click', () => {
+  $('reset-step-1').style.display = 'block';
+  $('reset-step-2').style.display = 'none';
+});
+
 $('reset-password-modal')?.addEventListener('click', (e) => {
   if (e.target === $('reset-password-modal')) closeResetPasswordModal();
 });
 
 // Dashboard
-$('btn-export-dashboard')?.addEventListener('click', () => handleExportCSV(currentDashboardScores));
+$('btn-export-dashboard')?.addEventListener('click', () => {
+  const tableData = state.teamMembers.map(m => {
+    const stats = currentDashboardScores.find(s => s.name === m.name) || {};
+    return { ...m, ...stats };
+  });
+  handleExportCSV(tableData);
+});
+
+$('btn-reset-passwords')?.addEventListener('click', async () => {
+  if (!confirm('Are you sure you want to reset ALL member passwords to Member@12345? (Admin will be Admin@12345)')) return;
+
+  try {
+    const res = await apiFetch('resetAllPasswords', { fromUser: state.currentUser }, 'POST');
+    if (res.success) {
+      showToast('All passwords have been reset successfully!', 'success');
+    } else {
+      throw new Error(res.error);
+    }
+  } catch (err) {
+    showToast('Failed to reset passwords: ' + err.message, 'error');
+  }
+});
 
 // Bulk Import
 $('btn-import-tasks')?.addEventListener('click', () => $('bulk-upload-file').click());
@@ -1794,7 +1856,7 @@ async function handleBulkUpload(e) {
 
       $('bulk-import-overlay').style.display = 'none';
       showToast(`Import complete! ${successCount} added.`);
-      
+
       openDashboard();
 
     } catch (err) {
@@ -1873,14 +1935,14 @@ function initChart(perfData) {
   const canvas = document.getElementById('performanceChart');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  
+
   if (performanceChart) {
     performanceChart.destroy();
   }
-  
+
   const labels = perfData.map(d => `W${d.week}`);
   const completionRates = perfData.map(d => d.totalAssigned > 0 ? Math.round((d.totalCompleted / d.totalAssigned) * 100) : 0);
-  
+
   performanceChart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -1963,7 +2025,7 @@ async function handleLeaveSubmit() {
       endDate,
       reason
     }, 'POST');
-    
+
     showToast('Leave Submitted Successfully! Admin will review it.');
     closeLeaveModal();
   } catch (err) {
@@ -2011,7 +2073,7 @@ async function checkBroadcast() {
     if (res.data) {
       const { message, createdAt } = res.data;
       const lastDismissed = localStorage.getItem('last_broadcast_dismissed');
-      
+
       if (lastDismissed !== createdAt) {
         $('broadcast-text').textContent = message;
         $('broadcast-banner').style.display = 'flex';
@@ -2039,7 +2101,7 @@ async function handleSendBroadcast() {
     await apiFetch('sendBroadcast', { message: msg }, 'POST');
     showToast('Broadcast sent to all users!');
     msgInput.value = '';
-    
+
     // Also show it locally immediately
     $('broadcast-text').textContent = msg;
     $('broadcast-banner').style.display = 'flex';
@@ -2133,7 +2195,7 @@ function startVoiceAssistant(preSelectedUser = null) {
 async function handleVoiceFinalText(text) {
   $('voice-transcript').textContent = `"${text}"`;
   $('voice-instruction').textContent = 'AI is processing...';
-  
+
   if (recognition) recognition.stop();
 
   try {
@@ -2144,7 +2206,7 @@ async function handleVoiceFinalText(text) {
       $('voice-res-user').value = selectedMember || task.assignee || '';
       $('voice-res-date').value = task.date || '';
       $('voice-res-type').value = task.type || 'one-time';
-      
+
       $('voice-status').style.display = 'none';
       $('voice-result').style.display = 'block';
     } else {
@@ -2179,7 +2241,7 @@ async function confirmVoiceTask() {
       taskType: type,
       plannedDate: date
     }, 'POST');
-    
+
     showToast('Task created successfully!');
     $('voice-modal').style.display = 'none';
     openDashboard(); // Refresh
@@ -2200,7 +2262,7 @@ async function openMemberTasksModal(name) {
   try {
     const res = await apiFetch('getTasks', { user: name });
     const tasks = res.data || [];
-    
+
     // Filter to show pending/overdue
     const activeTasks = tasks.filter(t => t.status !== 'done' && t.status !== 'missed');
 
@@ -2225,7 +2287,7 @@ async function openMemberTasksModal(name) {
         <div class="member-task-meta">
           <span>📅 ${t.plannedDate}</span>
           <span class="task-badge badge-${t.taskType}">${t.taskType}</span>
-          <span style="color:${t.status==='overdue'?'var(--accent-red)':'inherit'}">${t.status}</span>
+          <span style="color:${t.status === 'overdue' ? 'var(--accent-red)' : 'inherit'}">${t.status}</span>
         </div>
       </div>
     `).join('');
@@ -2233,3 +2295,6 @@ async function openMemberTasksModal(name) {
     $('member-tasks-list').innerHTML = '<div class="empty-state">Error loading tasks.</div>';
   }
 }
+
+// Initialization
+document.addEventListener('DOMContentLoaded', init);

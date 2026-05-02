@@ -79,19 +79,37 @@
   <div class="modal-overlay" id="reset-password-modal" style="display:none; z-index: 1000;">
     <div class="modal-card modal-card-sm">
       <div class="modal-header">
-        <h3>Reset Password</h3>
+        <h3>Forgot Password?</h3>
         <button class="modal-close" id="reset-close-btn" aria-label="Close" type="button">✕</button>
       </div>
-      <p class="modal-body-text" style="margin-bottom: var(--space-md);">Enter your email address and we'll send you a link to reset your password.</p>
-      <form id="reset-password-form">
+      
+      <!-- Step 1: Request OTP -->
+      <div id="reset-step-1">
         <div class="form-group">
-          <input type="email" id="reset-email" placeholder="you@example.com" required autocomplete="email">
+          <label>Email Address</label>
+          <input type="email" id="reset-email" placeholder="Enter your registered email" required>
         </div>
-        <div class="auth-error" id="reset-error" style="display:none; margin-bottom: var(--space-md);"></div>
-        <div class="modal-actions">
-          <button type="submit" class="btn-primary" id="reset-submit-btn" style="width: 100%;">Send Reset Link</button>
+        <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: var(--space-sm);">
+          We will send a 6-digit verification code to your email.
+        </p>
+        <div id="reset-error-1" class="error-msg" style="display:none; color: var(--accent-red); margin-bottom: 10px;"></div>
+        <button type="button" class="btn-primary" id="btn-send-otp" style="width:100%;">Send Verification Code</button>
+      </div>
+
+      <!-- Step 2: Verify OTP and Set Password -->
+      <div id="reset-step-2" style="display:none;">
+        <div class="form-group">
+          <label>Verification Code</label>
+          <input type="text" id="reset-otp" placeholder="Enter 6-digit code" maxlength="6">
         </div>
-      </form>
+        <div class="form-group">
+          <label>New Password</label>
+          <input type="password" id="reset-new-password" placeholder="Enter new password">
+        </div>
+        <div id="reset-error-2" class="error-msg" style="display:none; color: var(--accent-red); margin-bottom: 10px;"></div>
+        <button type="button" class="btn-primary" id="btn-verify-reset" style="width:100%;">Update Password</button>
+        <button type="button" class="btn-ghost" id="btn-back-to-step1" style="width:100%; margin-top:10px; background:none; border:none; color:var(--text-secondary); cursor:pointer;">Back</button>
+      </div>
     </div>
   </div>
 
@@ -176,7 +194,7 @@
 
     <!-- Admin Dashboard Section -->
     <div id="admin-dashboard-container" style="display:none;">
-      <div class="dashboard-content">
+      <div id="dashboard-content" class="dashboard-content">
         <div class="dashboard-header-inline" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-md);">
           <h2 style="font-size:1.2rem; font-weight:700;">Team Analytics</h2>
           <div style="display:flex; gap:var(--space-sm);">
@@ -188,6 +206,9 @@
             <button class="btn-export" id="btn-export-dashboard" style="display:flex; align-items:center; gap:var(--space-xs); background:transparent; border:1px solid var(--border-glass); border-radius:var(--radius-md); padding:var(--space-xs) var(--space-sm); color:var(--text-primary); cursor:pointer; font-size:0.85rem;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
               Export
+            </button>
+            <button id="btn-reset-passwords" style="display:none; align-items:center; gap:var(--space-xs); background:var(--danger-color); border:none; border-radius:var(--radius-md); padding:var(--space-xs) var(--space-sm); color:white; cursor:pointer; font-size:0.85rem;">
+              Reset Passwords
             </button>
           </div>
         </div>
@@ -243,19 +264,13 @@
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label for="new-task-type">Type</label>
+            <label for="new-task-type">Task Type</label>
             <select id="new-task-type">
-              <option value="one-time">One-Time</option>
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
+              <option value="daily">Daily (Every Day)</option>
+              <option value="weekly">Weekly (Every Monday)</option>
+              <option value="one-time">One-time Task</option>
             </select>
           </div>
-          <div class="form-group">
-            <label for="new-task-date">Due Date</label>
-            <input type="date" id="new-task-date">
-          </div>
-        </div>
-        <div class="form-row">
           <div class="form-group">
             <label for="new-task-priority">Priority</label>
             <select id="new-task-priority">
@@ -264,10 +279,14 @@
               <option value="High">High</option>
             </select>
           </div>
-          <div class="form-group">
-            <label for="new-task-notes">Notes (optional)</label>
-            <input type="text" id="new-task-notes" placeholder="Any extra details..." autocomplete="off">
-          </div>
+        </div>
+        <div class="form-group" id="planned-date-group">
+          <label for="new-task-date">Planned Date</label>
+          <input type="date" id="new-task-date">
+        </div>
+        <div class="form-group">
+          <label for="new-task-notes">Notes (optional)</label>
+          <input type="text" id="new-task-notes" placeholder="Any extra details..." autocomplete="off">
         </div>
         <button type="submit" class="btn-primary" id="add-task-submit">Add Task</button>
       </form>
@@ -390,7 +409,6 @@
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Supabase JS Client -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="app.js"></script>
   <!-- Member Actions Modal -->
   <div class="modal-overlay" id="member-actions-modal" style="display:none;">
