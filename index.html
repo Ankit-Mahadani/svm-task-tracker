@@ -256,7 +256,15 @@
       <form id="add-task-form">
         <div class="form-group">
           <label for="new-task-name">Task Name</label>
-          <input type="text" id="new-task-name" placeholder="e.g. Submit attendance report" required autocomplete="off">
+          <div class="input-with-icon">
+            <input type="text" id="new-task-name" placeholder="e.g. Submit attendance report" required autocomplete="off">
+            <button type="button" class="voice-btn" id="voice-btn" onclick="startVoiceInput()" title="Voice Input">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <div class="form-group" id="admin-assign-group" style="display:none;">
           <label for="new-task-assigned-to">Assign To</label>

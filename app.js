@@ -1264,17 +1264,15 @@ async function handleAddTaskSubmit(e) {
 function loadAssigneeList(defaultAssignee = null) {
   const select = $('new-task-assigned-to');
   if (!select) return;
-
+  
   const populate = (members) => {
     select.innerHTML = members.map(m => `<option value="${m.name}" ${m.name === defaultAssignee ? 'selected' : ''}>${m.name}</option>`).join('');
     if (defaultAssignee) select.value = defaultAssignee;
   };
 
-  // Use state.teamMembers if available, otherwise fetch
   if (state.teamMembers && state.teamMembers.length > 0) {
     populate(state.teamMembers);
   } else {
-    // Fallback to fetching
     apiFetch('getTeam').then(res => {
       if (res.success && res.data) {
         state.teamMembers = res.data;
@@ -1283,6 +1281,44 @@ function loadAssigneeList(defaultAssignee = null) {
     });
   }
 }
+
+// Voice Recognition
+function startVoiceInput() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    showToast('Voice recognition not supported in this browser', 'error');
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  const btn = $('voice-btn');
+  const input = $('new-task-name');
+
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+
+  recognition.onstart = () => {
+    btn.classList.add('listening');
+    showToast('Listening...', 'info');
+  };
+
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    input.value = transcript;
+    btn.classList.remove('listening');
+  };
+
+  recognition.onerror = (event) => {
+    btn.classList.remove('listening');
+    showToast('Voice recognition error: ' + event.error, 'error');
+  };
+
+  recognition.onend = () => {
+    btn.classList.remove('listening');
+  };
+
+  recognition.start();
+};
 
 function openEditTaskModal(taskId) {
   const task = state.tasks.find(t => t.taskId === taskId);
