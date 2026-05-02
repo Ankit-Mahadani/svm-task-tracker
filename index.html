@@ -288,23 +288,26 @@
     </div>
   </div>
 
-  <!-- Reschedule Task Modal -->
+  <!-- Transfer Task Modal -->
   <div class="modal-overlay" id="shift-task-modal" style="display:none;">
     <div class="modal-card modal-card-sm">
       <div class="modal-header">
-        <h3>Reschedule Task</h3>
+        <h3>Transfer Task</h3>
         <button class="modal-close" id="shift-cancel-btn-top" aria-label="Close">✕</button>
       </div>
       <p class="modal-body-text" style="font-size: 0.9rem; margin-bottom: var(--space-md); color: var(--text-muted);">
-        Move this task to a future date. <strong style="color: var(--danger-color);">You will lose 5 points</strong> as a penalty for rescheduling.
+        Assign this task to another member for today. <strong style="color: var(--accent-amber);">You will lose 5 points</strong> as a penalty for the transfer.
       </p>
       <div class="form-group">
-        <label for="shift-task-date">New Date</label>
-        <input type="date" id="shift-task-date">
+        <label for="shift-task-assignee">Transfer To</label>
+        <select id="shift-task-assignee"></select>
       </div>
+      <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">
+        Note: Recurring tasks will automatically return to you in the next cycle.
+      </p>
       <div class="modal-actions">
         <button class="btn-secondary" id="shift-cancel-btn">Cancel</button>
-        <button class="btn-primary" id="shift-confirm-btn">Reschedule</button>
+        <button class="btn-primary" id="shift-confirm-btn">Transfer</button>
       </div>
     </div>
   </div>

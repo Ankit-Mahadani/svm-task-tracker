@@ -1437,15 +1437,27 @@ let pendingShiftTaskId = null;
 
 async function openShiftTaskModal(taskId) {
   pendingShiftTaskId = taskId;
-  const dateInput = $('shift-task-date');
   
-  // Default to tomorrow
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.getFullYear() + '-' + String(tomorrow.getMonth() + 1).padStart(2, '0') + '-' + String(tomorrow.getDate()).padStart(2, '0');
+  const assigneeSelect = $('shift-task-assignee');
+  assigneeSelect.innerHTML = '';
   
-  dateInput.value = tomorrowStr;
-  dateInput.min = getTodayStr(); // Can't reschedule to the past
+  // Find current task to exclude current owner
+  const task = state.tasks.find(t => t.taskId === taskId);
+  const currentOwner = task ? task.assignedTo : '';
+
+  state.teamMembers.forEach(m => {
+    if (m.name !== currentOwner && (m.active === true || m.active === 'TRUE')) {
+      const opt = document.createElement('option');
+      opt.value = m.name;
+      opt.textContent = m.name;
+      assigneeSelect.appendChild(opt);
+    }
+  });
+
+  if (assigneeSelect.options.length === 0) {
+    showToast('No other active members available for transfer', 'error');
+    return;
+  }
   
   $('shift-task-modal').style.display = 'flex';
 }
@@ -1553,39 +1565,32 @@ $('new-comment-text')?.addEventListener('keypress', (e) => {
 
 async function handleShiftTaskSubmit() {
   if (!pendingShiftTaskId) return;
-  const dateInput = $('shift-task-date');
-  const newDate = dateInput.value;
-  if (!newDate) return;
+  const assigneeSelect = $('shift-task-assignee');
+  const newAssignee = assigneeSelect.value;
+  if (!newAssignee) return;
 
   const taskId = pendingShiftTaskId;
   const btn = $('shift-confirm-btn');
   btn.disabled = true;
-  btn.textContent = 'Rescheduling...';
+  btn.textContent = 'Transferring...';
 
   try {
     await apiFetch('shiftTask', {
       taskId: taskId,
       fromUser: state.currentUser,
-      newDate: newDate
+      newAssignee: newAssignee
     }, 'POST');
 
-    // Update local task state
+    // Update local task state (remove from current view as it's no longer yours)
     const taskIdx = state.tasks.findIndex(t => t.taskId === taskId);
     if (taskIdx !== -1) {
-       // If it's not today anymore, remove it from the view
-       const today = getTodayStr();
-       if (newDate !== today) {
-         state.tasks.splice(taskIdx, 1);
-         const card = document.querySelector(`[data-task-id="${taskId}"]`);
-         if (card) {
-           card.style.transition = 'all 0.3s ease';
-           card.style.transform = 'translateX(-100%)';
-           card.style.opacity = '0';
-           setTimeout(() => card.remove(), 300);
-         }
-       } else {
-         state.tasks[taskIdx].plannedDate = newDate;
-         renderTasks(state.tasks);
+       state.tasks.splice(taskIdx, 1);
+       const card = document.querySelector(`[data-task-id="${taskId}"]`);
+       if (card) {
+         card.style.transition = 'all 0.3s ease';
+         card.style.transform = 'translateX(100%)';
+         card.style.opacity = '0';
+         setTimeout(() => card.remove(), 300);
        }
     }
 
@@ -1594,14 +1599,14 @@ async function handleShiftTaskSubmit() {
       if (state.tasks.length === 0) renderEmptyState();
     }, 350);
 
-    showToast(`Task rescheduled to ${newDate}. 5 point penalty applied.`, 'warning');
+    showToast(`Task transferred to ${newAssignee}. 5 point penalty applied.`, 'warning');
     closeShiftTaskModal();
   } catch (err) {
-    showToast('Failed to reschedule task.', 'error');
+    showToast('Failed to transfer task.', 'error');
     console.error(err);
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Reschedule';
+    btn.textContent = 'Transfer';
   }
 }
 
