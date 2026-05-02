@@ -249,6 +249,8 @@ function toggleAuthMode() {
     : `Don't have an account? <button type="button" class="btn-link" id="auth-toggle-btn-inner">Sign Up</button>`;
   const nameGroup = $('auth-name-group');
   if (nameGroup) nameGroup.style.display = isSignUp ? 'block' : 'none';
+  const roleGroup = $('auth-role-group');
+  if (roleGroup) roleGroup.style.display = isSignUp ? 'block' : 'none';
   const forgotGroup = $('auth-forgot-password-group');
   if (forgotGroup) forgotGroup.style.display = isSignUp ? 'none' : 'block';
   $('auth-error').style.display = 'none';
@@ -272,13 +274,14 @@ async function handleAuthSubmit(e) {
 
   try {
     if (isSignUp) {
+      const role = $('auth-role').value;
       if (!name) {
         throw new Error('Please enter your Full Name.');
       }
       const { data, error } = await supabaseClient.auth.signUp({
         email,
         password,
-        options: { data: { role: 'member', name: name } }
+        options: { data: { role: role, name: name } }
       });
       if (error) throw error;
       if (data.user && data.user.identities && data.user.identities.length === 0) {
@@ -287,7 +290,7 @@ async function handleAuthSubmit(e) {
 
       // 🆕 Register in Google Sheet as PENDING
       try {
-        await apiFetch('registerMember', { name, email }, 'POST');
+        await apiFetch('registerMember', { name, email, role }, 'POST');
       } catch (regErr) {
         console.error('Failed to register in Sheet:', regErr);
       }
@@ -358,7 +361,6 @@ function handleUserSignedOut() {
   $('auth-overlay').style.display = 'flex';
   $('app-header').style.display = 'none';
   $('app-footer').style.display = 'none';
-  $('fab-add').style.display = 'none';
   $('task-view-container').style.display = 'none';
   $('admin-dashboard-container').style.display = 'none';
 }
@@ -380,6 +382,9 @@ async function handleUserSignedIn(user) {
 
     if (member) {
       state.currentUser = member.name;
+      // Set role from sheet mapping (normalized to lowercase)
+      state.userRole = (member.role || 'member').toLowerCase();
+      
       // 🆕 Check if approved
       if (!member.active && normalizedEmail !== 'admin@saraswatividyamandir.com') {
         $('auth-error').textContent = 'Your account is pending Admin approval. Please try again later.';
@@ -401,6 +406,7 @@ async function handleUserSignedIn(user) {
       const emailName = user.email.split('@')[0];
       const fallbackName = emailName.charAt(0).toUpperCase() + emailName.slice(1);
       state.currentUser = user.user_metadata?.name || fallbackName;
+      state.userRole = user.user_metadata?.role || 'member';
     }
   } catch(err) {
     console.error('Failed to fetch dynamic team mapping:', err);
@@ -411,26 +417,34 @@ async function handleUserSignedIn(user) {
     const emailName = user.email.split('@')[0];
     const fallbackName = emailName.charAt(0).toUpperCase() + emailName.slice(1);
     state.currentUser = user.user_metadata?.name || fallbackName;
+    state.userRole = 'admin';
   }
   
   if (normalizedEmail === 'admin@saraswatividyamandir.com') {
     state.userRole = 'admin';
     state.currentUser = 'Admin';
-  } else {
-    state.userRole = 'member';
   }
 
   $('auth-overlay').style.display = 'none';
 
-  if (state.userRole === 'admin') {
-    $('admin-dashboard-container').style.display = 'block';
-    $('task-view-container').style.display = 'none';
-    renderHeader(state.currentUser, false);
-    openDashboard(); // Fetch and render dashboard
-  } else {
+  // Admin and Coordinator have access to the dashboard and tabs
+  if (state.userRole === 'admin' || state.userRole === 'coordinator') {
+    $('header-nav').style.display = 'flex';
+    $('header-add-task').style.display = 'flex';
+    
+    // Default to "My Tasks" view for everyone, including coordinators
+    state.currentView = 'tasks';
     $('admin-dashboard-container').style.display = 'none';
     $('task-view-container').style.display = 'block';
-    renderHeader(state.currentUser, true);
+    
+    renderHeader(state.currentUser);
+    initForUser(state.currentUser);
+  } else {
+    $('header-nav').style.display = 'none';
+    $('header-add-task').style.display = 'none';
+    $('admin-dashboard-container').style.display = 'none';
+    $('task-view-container').style.display = 'block';
+    renderHeader(state.currentUser);
     initForUser(state.currentUser);
   }
 
@@ -442,7 +456,6 @@ function renderHeader(user, showFab = true) {
   $('greeting-text').textContent = `Good ${getTimeOfDay()}, ${user}`;
   $('app-header').style.display = 'flex';
   $('app-footer').style.display = 'block';
-  $('fab-add').style.display = showFab ? 'flex' : 'none';
 }
 
 function renderBriefing(html) {
@@ -624,7 +637,7 @@ function renderTaskCard(task) {
         ${!isDone ? `<button class="task-shift-btn" data-shift-id="${task.taskId}" title="Shift task" aria-label="Shift task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
         </button>` : ''}
-        ${state.userRole === 'admin' ? `
+        ${(state.userRole === 'admin' || state.userRole === 'coordinator') ? `
         <button class="task-edit-btn" data-edit-id="${task.taskId}" title="Edit task" aria-label="Edit task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
         </button>
@@ -745,9 +758,9 @@ async function openDashboard() {
 function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []) {
   const gridContainer = $('dashboard-grid');
   
-  // 1. Pending Approvals Section
+  // 1. Pending Approvals Section (Admin only)
   let pendingHTML = '';
-  if (pendingMembers.length > 0) {
+  if (state.userRole === 'admin' && pendingMembers.length > 0) {
     pendingHTML = `
       <div class="pending-approvals-section" style="margin-bottom: var(--space-xl);">
         <h3 class="section-title" style="margin-bottom: var(--space-md); display: flex; align-items: center; gap: 8px;">
@@ -769,10 +782,10 @@ function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []
     `;
   }
 
-  // 2. Pending Leaves Section
+  // 2. Pending Leaves Section (Admin only)
   const pendingLeaves = leaves.filter(l => l.status === 'pending');
   let leavesHTML = '';
-  if (pendingLeaves.length > 0) {
+  if (state.userRole === 'admin' && pendingLeaves.length > 0) {
     leavesHTML = `
       <div class="pending-leaves-section" style="margin-bottom: var(--space-xl);">
         <h3 class="section-title" style="margin-bottom: var(--space-md); display: flex; align-items: center; gap: 8px;">
@@ -798,9 +811,19 @@ function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []
     `;
   }
 
-  // 3. Render Chart
-  if (perfData.length > 0) {
-    initChart(perfData);
+  // 3. Render Chart (Admin only)
+  const trendSection = $('dashboard-trend-section');
+  const broadcastSection = $('dashboard-broadcast-section');
+  
+  if (state.userRole === 'admin') {
+    trendSection.style.display = 'block';
+    broadcastSection.style.display = 'block';
+    if (perfData.length > 0) {
+      initChart(perfData);
+    }
+  } else {
+    trendSection.style.display = 'none';
+    broadcastSection.style.display = 'none';
   }
 
   if (!scores || scores.length === 0) {
@@ -1238,7 +1261,7 @@ function openAddTaskModal(defaultAssignee = null) {
   $('task-modal-title').textContent = 'New Task';
   $('add-task-submit').textContent = 'Add Task';
   
-  if (state.userRole === 'admin') {
+  if (state.userRole === 'admin' || state.userRole === 'coordinator') {
     $('admin-assign-group').style.display = 'block';
     const assignSelect = $('new-task-assigned-to');
     assignSelect.innerHTML = state.teamMembers.map(m => 
@@ -1299,7 +1322,7 @@ async function handleTaskSubmit(e) {
 
   try {
     const action = isEdit ? 'editTask' : 'addTask';
-    const assignedToUser = (state.userRole === 'admin' && !isEdit) 
+    const assignedToUser = ((state.userRole === 'admin' || state.userRole === 'coordinator') && !isEdit) 
       ? $('new-task-assigned-to').value 
       : state.currentUser;
 
@@ -1409,26 +1432,17 @@ let pendingShiftTaskId = null;
 
 async function openShiftTaskModal(taskId) {
   pendingShiftTaskId = taskId;
-  const select = $('shift-task-assignee');
-  select.innerHTML = '<option>Loading...</option>';
+  const dateInput = $('shift-task-date');
+  
+  // Default to tomorrow
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.getFullYear() + '-' + String(tomorrow.getMonth() + 1).padStart(2, '0') + '-' + String(tomorrow.getDate()).padStart(2, '0');
+  
+  dateInput.value = tomorrowStr;
+  dateInput.min = getTodayStr(); // Can't reschedule to the past
+  
   $('shift-task-modal').style.display = 'flex';
-
-  try {
-    const res = await apiFetch('getTeam');
-    const team = res.data || [];
-    // Show all active members EXCEPT the current user
-    const others = team.filter(m => m.active !== false && m.name !== state.currentUser);
-    
-    if (others.length === 0) {
-      select.innerHTML = '<option disabled>No other team members available</option>';
-      $('shift-confirm-btn').disabled = true;
-    } else {
-      select.innerHTML = others.map(m => `<option value="${m.name}">${m.name}</option>`).join('');
-      $('shift-confirm-btn').disabled = false;
-    }
-  } catch(err) {
-    select.innerHTML = '<option disabled>Error loading team</option>';
-  }
 }
 
 function closeShiftTaskModal() {
@@ -1534,32 +1548,40 @@ $('new-comment-text')?.addEventListener('keypress', (e) => {
 
 async function handleShiftTaskSubmit() {
   if (!pendingShiftTaskId) return;
-  const select = $('shift-task-assignee');
-  const newAssignee = select.value;
-  if (!newAssignee) return;
+  const dateInput = $('shift-task-date');
+  const newDate = dateInput.value;
+  if (!newDate) return;
 
   const taskId = pendingShiftTaskId;
   const btn = $('shift-confirm-btn');
   btn.disabled = true;
-  btn.textContent = 'Shifting...';
+  btn.textContent = 'Rescheduling...';
 
   try {
     await apiFetch('shiftTask', {
       taskId: taskId,
       fromUser: state.currentUser,
-      toUser: newAssignee
+      newDate: newDate
     }, 'POST');
 
-    // Remove the task from the local UI since it's shifted away
-    state.tasks = state.tasks.filter(t => t.taskId !== taskId);
-    
-    // Remove the card visually
-    const card = document.querySelector(`[data-task-id="${taskId}"]`);
-    if (card) {
-      card.style.transition = 'all 0.3s ease';
-      card.style.transform = 'translateX(-100%)';
-      card.style.opacity = '0';
-      setTimeout(() => card.remove(), 300);
+    // Update local task state
+    const taskIdx = state.tasks.findIndex(t => t.taskId === taskId);
+    if (taskIdx !== -1) {
+       // If it's not today anymore, remove it from the view
+       const today = getTodayStr();
+       if (newDate !== today) {
+         state.tasks.splice(taskIdx, 1);
+         const card = document.querySelector(`[data-task-id="${taskId}"]`);
+         if (card) {
+           card.style.transition = 'all 0.3s ease';
+           card.style.transform = 'translateX(-100%)';
+           card.style.opacity = '0';
+           setTimeout(() => card.remove(), 300);
+         }
+       } else {
+         state.tasks[taskIdx].plannedDate = newDate;
+         renderTasks(state.tasks);
+       }
     }
 
     setTimeout(() => {
@@ -1567,14 +1589,14 @@ async function handleShiftTaskSubmit() {
       if (state.tasks.length === 0) renderEmptyState();
     }, 350);
 
-    showToast(`Task shifted to ${newAssignee}. 5 point penalty applied.`, 'warning');
+    showToast(`Task rescheduled to ${newDate}. 5 point penalty applied.`, 'warning');
     closeShiftTaskModal();
   } catch (err) {
-    showToast('Failed to shift task.', 'error');
+    showToast('Failed to reschedule task.', 'error');
     console.error(err);
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Shift Task';
+    btn.textContent = 'Reschedule';
   }
 }
 
@@ -1604,8 +1626,30 @@ $('retry-btn')?.addEventListener('click', () => {
   init();
 });
 
+// Header navigation tabs
+$('tab-my-tasks')?.addEventListener('click', () => switchView('tasks'));
+$('tab-team')?.addEventListener('click', () => switchView('team'));
+$('header-add-task')?.addEventListener('click', () => openAddTaskModal());
+
+function switchView(view) {
+  state.currentView = view;
+  
+  if (view === 'tasks') {
+    $('tab-my-tasks').classList.add('active');
+    $('tab-team').classList.remove('active');
+    $('task-view-container').style.display = 'block';
+    $('admin-dashboard-container').style.display = 'none';
+    initForUser(state.currentUser);
+  } else {
+    $('tab-my-tasks').classList.remove('active');
+    $('tab-team').classList.add('active');
+    $('task-view-container').style.display = 'none';
+    $('admin-dashboard-container').style.display = 'block';
+    openDashboard();
+  }
+}
+
 // Add Task modal
-$('fab-add')?.addEventListener('click', openAddTaskModal);
 $('modal-close-btn')?.addEventListener('click', closeAddTaskModal);
 $('add-task-form')?.addEventListener('submit', handleTaskSubmit);
 $('add-task-modal')?.addEventListener('click', (e) => {
@@ -2005,6 +2049,8 @@ document.addEventListener('click', e => {
     $('member-actions-modal').style.display = 'none';
     startVoiceAssistant(selectedMember);
   }
+  if (e.target.id === 'btn-view-member-tasks') openMemberTasksModal(selectedMember);
+  if (e.target.id === 'member-tasks-close-btn') $('member-tasks-modal').style.display = 'none';
 });
 
 // =============================================
@@ -2106,9 +2152,9 @@ async function confirmVoiceTask() {
 
   try {
     await apiFetch('addTask', {
-      name,
-      user,
-      type,
+      taskName: name,
+      assignedTo: user,
+      taskType: type,
       plannedDate: date
     }, 'POST');
     
@@ -2120,5 +2166,48 @@ async function confirmVoiceTask() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Create Task';
+  }
+}
+
+async function openMemberTasksModal(name) {
+  $('member-actions-modal').style.display = 'none';
+  $('member-tasks-title').textContent = `${name}'s Tasks`;
+  $('member-tasks-list').innerHTML = '<div class="empty-state">Loading tasks...</div>';
+  $('member-tasks-modal').style.display = 'flex';
+
+  try {
+    const res = await apiFetch('getTasks', { user: name });
+    const tasks = res.data || [];
+    
+    // Filter to show pending/overdue
+    const activeTasks = tasks.filter(t => t.status !== 'done' && t.status !== 'missed');
+
+    if (activeTasks.length === 0) {
+      $('member-tasks-list').innerHTML = '<div class="empty-state">No active tasks for this member.</div>';
+      return;
+    }
+
+    $('member-tasks-list').innerHTML = activeTasks.map(t => `
+      <div class="member-task-item">
+        <div style="display:flex; justify-content:space-between; align-items:start;">
+          <div class="member-task-name">${t.taskName}</div>
+          <div style="display:flex; gap:8px;">
+             <button onclick="handleEditTask('${t.taskId}')" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:2px;" title="Edit">
+               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+             </button>
+             <button onclick="handleDeleteTask('${t.taskId}')" style="background:none; border:none; color:var(--accent-red); cursor:pointer; padding:2px;" title="Delete">
+               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+             </button>
+          </div>
+        </div>
+        <div class="member-task-meta">
+          <span>📅 ${t.plannedDate}</span>
+          <span class="task-badge badge-${t.taskType}">${t.taskType}</span>
+          <span style="color:${t.status==='overdue'?'var(--accent-red)':'inherit'}">${t.status}</span>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    $('member-tasks-list').innerHTML = '<div class="empty-state">Error loading tasks.</div>';
   }
 }
