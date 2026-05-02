@@ -426,11 +426,12 @@ async function handleUserSignedIn(user) {
   }
 
   $('auth-overlay').style.display = 'none';
+  $('app-header').style.display = 'flex';
+  $('header-add-task').style.display = 'flex'; // Everyone can add tasks
 
-  // Admin and Coordinator have access to the dashboard and tabs
+  // Admin and Coordinator have access to the navigation tabs
   if (state.userRole === 'admin' || state.userRole === 'coordinator') {
     $('header-nav').style.display = 'flex';
-    $('header-add-task').style.display = 'flex';
     
     // Default to "My Tasks" view for everyone, including coordinators
     state.currentView = 'tasks';
@@ -441,7 +442,6 @@ async function handleUserSignedIn(user) {
     initForUser(state.currentUser);
   } else {
     $('header-nav').style.display = 'none';
-    $('header-add-task').style.display = 'none';
     $('admin-dashboard-container').style.display = 'none';
     $('task-view-container').style.display = 'block';
     renderHeader(state.currentUser);
@@ -450,6 +450,8 @@ async function handleUserSignedIn(user) {
 
   // Check for any urgent announcements
   checkBroadcast();
+  
+  $('loading-screen').classList.add('hidden');
 }
 
 function renderHeader(user, showFab = true) {
@@ -599,7 +601,7 @@ function formatDate(dateStr) {
 
 function renderTaskCard(task) {
   const isDone = task.status === 'done';
-  const isOverdue = task.status === 'overdue';
+  const isOverdue = task.status === 'overdue' && task.taskType !== 'daily';
   const badgeClass = task.taskType === 'daily' ? 'badge-daily' : task.taskType === 'weekly' ? 'badge-weekly' : 'badge-one-time';
   const prioClass = `priority-${(task.priority || 'Medium').toLowerCase()}`;
   
@@ -774,7 +776,10 @@ function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []
                 <div style="font-weight: 600; font-size: 0.95rem;">${m.name}</div>
                 <div style="font-size: 0.75rem; color: var(--text-muted);">${m.email}</div>
               </div>
-              <button class="btn-primary approve-member-btn" data-email="${m.email}" style="padding: 6px 12px; font-size: 0.75rem; width: auto;">Approve</button>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn-primary approve-member-btn" data-email="${m.email}" style="padding: 6px 12px; font-size: 0.75rem; width: auto; margin: 0;">Approve</button>
+                <button class="btn-secondary reject-member-btn" data-email="${m.email}" style="padding: 6px 12px; font-size: 0.75rem; width: auto; margin: 0; background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2); color: #ef4444;">Reject</button>
+              </div>
             </div>
           `).join('')}
         </div>
@@ -1810,25 +1815,32 @@ $('status-filter')?.addEventListener('change', (e) => {
 // Approval Logic
 function bindApprovalEvents() {
   document.querySelectorAll('.approve-member-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
+    btn.onclick = async () => {
       const email = btn.dataset.email;
       btn.disabled = true;
-      btn.textContent = 'Approving...';
-      try {
-        await handleApproveMember(email);
-        showToast('Member approved successfully!');
-        openDashboard(); // Refresh
-      } catch (err) {
-        showToast('Failed to approve member: ' + err.message, 'error');
-        btn.disabled = false;
-        btn.textContent = 'Approve';
+      btn.textContent = '...';
+      await handleReviewMember(email, 'approve');
+    };
+  });
+  document.querySelectorAll('.reject-member-btn').forEach(btn => {
+    btn.onclick = async () => {
+      if (confirm(`Are you sure you want to reject and delete ${btn.dataset.email}?`)) {
+        btn.disabled = true;
+        btn.textContent = '...';
+        await handleReviewMember(btn.dataset.email, 'reject');
       }
-    });
+    };
   });
 }
 
-async function handleApproveMember(email) {
-  return apiFetch('approveMember', { email }, 'POST');
+async function handleReviewMember(email, action) {
+  try {
+    await apiFetch('approveMember', { email, action }, 'POST');
+    showToast(`Member ${action === 'approve' ? 'approved' : 'rejected'}`);
+    openDashboard(); // Refresh
+  } catch (err) {
+    showToast('Action failed', 'error');
+  }
 }
 
 // Pull-to-refresh (simple)

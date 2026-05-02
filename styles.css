@@ -313,17 +313,44 @@ body::before {
   max-width: 480px;
   z-index: 200;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  padding: env(safe-area-inset-top, 10px) var(--space-md) 10px var(--space-md);
+  padding: calc(env(safe-area-inset-top, 10px) + 10px) var(--space-md) 10px var(--space-md);
   height: auto;
-  min-height: 72px;
+  min-height: 80px;
   background: rgba(10, 10, 20, 0.95);
   border-bottom: 1px solid var(--border-glass);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   box-sizing: border-box;
   gap: var(--space-sm);
+}
+
+.header-left, .header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.header-center {
+  order: 3;
+  width: 100%;
+  justify-content: center;
+  margin-top: var(--space-xs);
+}
+
+@media (min-width: 400px) {
+  .app-header {
+    flex-wrap: nowrap;
+    min-height: 72px;
+    padding-top: env(safe-area-inset-top, 10px);
+  }
+  .header-center {
+    order: unset;
+    width: auto;
+    margin-top: 0;
+  }
 }
 
 .light-theme .app-header {
