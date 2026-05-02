@@ -7,7 +7,7 @@
 // =============================================
 const CONFIG = {
   // 🔴 REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbyoQDigbSeM67MahKB5uR2GbknZ58nzQ7w4tEogkAr8Sue0EjRPqCajzGrpKlOKAw0/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbyPtmXN74bl0x2ByrkpHDWpgJ-Ncl8wlqEDe_RYimCmoJR6JuZmWSkew_vyo3RTMCGS/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
