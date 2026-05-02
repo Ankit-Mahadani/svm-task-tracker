@@ -1636,21 +1636,26 @@ $('tab-my-tasks')?.addEventListener('click', () => switchView('tasks'));
 $('tab-team')?.addEventListener('click', () => switchView('team'));
 $('header-add-task')?.addEventListener('click', () => openAddTaskModal());
 
-function switchView(view) {
+async function switchView(view) {
+  if (state.currentView === view && view === 'team') return; // Already there
   state.currentView = view;
   
+  // 1. Update Tab Highlighting immediately
+  const myTasksTab = $('tab-my-tasks');
+  const teamTab = $('tab-team');
+  
   if (view === 'tasks') {
-    $('tab-my-tasks').classList.add('active');
-    $('tab-team').classList.remove('active');
+    myTasksTab?.classList.add('active');
+    teamTab?.classList.remove('active');
     $('task-view-container').style.display = 'block';
     $('admin-dashboard-container').style.display = 'none';
-    initForUser(state.currentUser);
+    await initForUser(state.currentUser);
   } else {
-    $('tab-my-tasks').classList.remove('active');
-    $('tab-team').classList.add('active');
+    myTasksTab?.classList.remove('active');
+    teamTab?.classList.add('active');
     $('task-view-container').style.display = 'none';
     $('admin-dashboard-container').style.display = 'block';
-    openDashboard();
+    await openDashboard();
   }
 }
 
@@ -1835,7 +1840,7 @@ function bindApprovalEvents() {
 
 async function handleReviewMember(email, action) {
   try {
-    await apiFetch('approveMember', { email, action }, 'POST');
+    await apiFetch('approveMember', { email, decision: action }, 'POST');
     showToast(`Member ${action === 'approve' ? 'approved' : 'rejected'}`);
     openDashboard(); // Refresh
   } catch (err) {
