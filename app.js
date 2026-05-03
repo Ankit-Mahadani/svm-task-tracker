@@ -6,8 +6,8 @@
 // CONFIGURATION
 // =============================================
 const CONFIG = {
-  // 🔴 REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbyPtmXN74bl0x2ByrkpHDWpgJ-Ncl8wlqEDe_RYimCmoJR6JuZmWSkew_vyo3RTMCGS/exec',
+  //  REPLACE THIS with your deployed Apps Script Web App URL
+  API_URL: 'https://script.google.com/macros/s/AKfycbxjDEicM8H7_UX86N-DuMDbZiWoBXF-bEYqdsl1B-7xjh9BopkFAKAlvUp7vw731rDM/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
@@ -1382,7 +1382,7 @@ async function handleTaskSubmit(e) {
 
   try {
     const action = isEdit ? 'editTask' : 'addTask';
-    
+
     let assignedToUser;
     if (state.userRole === 'admin' || state.userRole === 'coordinator') {
       // Admins/Coordinators pick from dropdown
