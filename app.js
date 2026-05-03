@@ -485,8 +485,20 @@ function renderTests(tests) {
   container.innerHTML = tests.map(test => {
     const heldOnDate = new Date(test.heldOn);
 
+    // Check if any stage is overdue to apply card styling
+    const hasOverdueStage = (state.testSettings || []).some(stage => {
+      const stages = test.stages || [];
+      const testStage = stages.find(s => s.id === stage.id) || { status: 'pending' };
+      if (testStage.status === 'done') return false;
+      
+      const pDate = new Date(heldOnDate);
+      pDate.setDate(heldOnDate.getDate() + (stage.offset || 0));
+      pDate.setHours(23, 59, 59, 999); // End of day check
+      return new Date() > pDate;
+    });
+
     return `
-      <div class="test-card" data-test-id="${test.testId}">
+      <div class="test-card ${hasOverdueStage ? 'overdue' : ''}" data-test-id="${test.testId}">
         <div class="test-header">
           <div class="test-title-group">
             <div class="test-name">${test.testName}</div>
@@ -527,7 +539,9 @@ function renderTests(tests) {
       const plannedDate = new Date(heldOnDate);
       plannedDate.setDate(heldOnDate.getDate() + (stage.offset || 0));
 
-      const isDelayed = testStage.status !== 'done' && new Date() > plannedDate;
+      const pDateCheck = new Date(plannedDate);
+      pDateCheck.setHours(23, 59, 59, 999);
+      const isDelayed = testStage.status !== 'done' && new Date() > pDateCheck;
       const statusClass = testStage.status === 'done' ? 'done' : (isDelayed ? 'delayed' : 'pending');
 
       const collabInfo = testStage.status === 'done'

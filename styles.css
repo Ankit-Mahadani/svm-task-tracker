@@ -1903,6 +1903,21 @@ body::before {
   box-shadow: var(--shadow-md);
 }
 
+.test-card.overdue {
+  border-left: 4px solid var(--accent-red);
+}
+
+.test-card.overdue::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--accent-red);
+  animation: pulse-opacity 2s ease-in-out infinite;
+}
+
 .test-header {
   display: flex;
   justify-content: space-between;
@@ -2010,8 +2025,11 @@ body::before {
 }
 
 .pipeline-step.delayed .step-indicator {
+  background: var(--accent-red);
   border-color: var(--accent-red);
-  color: var(--accent-red);
+  color: white;
+  box-shadow: 0 0 12px var(--accent-red-glow);
+  animation: pulse-opacity 2s ease-in-out infinite;
 }
 
 .step-label {
