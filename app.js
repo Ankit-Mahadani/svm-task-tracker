@@ -7,7 +7,7 @@
 // =============================================
 const CONFIG = {
   //  REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbxjDEicM8H7_UX86N-DuMDbZiWoBXF-bEYqdsl1B-7xjh9BopkFAKAlvUp7vw731rDM/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbz5S3PFryWY2sNy_Yp3Ek2szRxSAzseKkIiheMDEj8b83IRTI1C2MwVgVrSLb5A8x7w/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
@@ -39,7 +39,9 @@ const state = {
     status: 'all'
   },
   theme: localStorage.getItem('theme') === 'light' ? 'light' : 'dark',
-  editingTaskId: null
+  editingTaskId: null,
+  tests: [],
+  testSettings: []
 };
 
 // =============================================
@@ -396,24 +398,293 @@ function handleUserSignedIn(userData) {
   $('app-header').style.display = 'flex';
   $('header-add-task').style.display = 'flex';
 
-  // Admin and Coordinator have access to the navigation tabs
+  // Show navigation tabs to all roles (Admin, Coordinator, Member)
+  $('header-nav').style.display = 'flex';
+
+  // Only Admin and Coordinator can see the "Team" (Dashboard) tab
   if (state.userRole === 'admin' || state.userRole === 'coordinator') {
-    $('header-nav').style.display = 'flex';
-    state.currentView = 'tasks';
-    $('admin-dashboard-container').style.display = 'none';
-    $('task-view-container').style.display = 'block';
-    renderHeader(state.currentUser);
-    initForUser(state.currentUser);
+    $('tab-team').style.display = 'block';
   } else {
-    $('header-nav').style.display = 'none';
-    $('admin-dashboard-container').style.display = 'none';
-    $('task-view-container').style.display = 'block';
-    renderHeader(state.currentUser);
-    initForUser(state.currentUser);
+    $('tab-team').style.display = 'none';
   }
+
+  state.currentView = 'tasks';
+  $('admin-dashboard-container').style.display = 'none';
+  $('test-tracker-container').style.display = 'none';
+  $('task-view-container').style.display = 'block';
+  renderHeader(state.currentUser);
+  initForUser(state.currentUser);
+
+  // Bind tab events
+  $('tab-my-tasks').onclick = () => {
+    state.currentView = 'tasks';
+    setActiveTab('tab-my-tasks');
+    $('task-view-container').style.display = 'block';
+    $('admin-dashboard-container').style.display = 'none';
+    $('test-tracker-container').style.display = 'none';
+  };
+  $('tab-team').onclick = () => {
+    setActiveTab('tab-team');
+    openDashboard();
+    $('task-view-container').style.display = 'none';
+    $('test-tracker-container').style.display = 'none';
+  };
+  $('tab-tests').onclick = () => {
+    setActiveTab('tab-tests');
+    openTestTracker();
+    $('task-view-container').style.display = 'none';
+    $('admin-dashboard-container').style.display = 'none';
+    $('test-tracker-container').style.display = 'block';
+  };
 
   checkBroadcast();
   $('loading-screen').classList.add('hidden');
+}
+
+function setActiveTab(id) {
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  $(id).classList.add('active');
+}
+
+async function openTestTracker() {
+  state.currentView = 'tests';
+  const container = $('test-list-content');
+  container.innerHTML = '<div class="loading-spinner" style="margin: 3rem auto;"></div>';
+
+  try {
+    const [settingsRes, testsRes] = await Promise.all([
+      apiFetch('getTestSettings'),
+      apiFetch('getTests')
+    ]);
+
+    if (settingsRes.success) state.testSettings = settingsRes.data;
+    if (testsRes.success) state.tests = testsRes.data;
+
+    renderTests(state.tests);
+  } catch (err) {
+    console.error('Failed to load test tracker:', err);
+    container.innerHTML = '<div class="empty-state">Failed to load tests.</div>';
+  }
+}
+
+function renderTests(tests) {
+  const container = $('test-list-content');
+  if (tests.length === 0) {
+    container.innerHTML = '<div class="empty-state">No tests tracked yet.</div>';
+    return;
+  }
+
+  container.innerHTML = tests.map(test => {
+    const heldOnDate = new Date(test.heldOn);
+
+    return `
+      <div class="test-card" data-test-id="${test.testId}">
+        <div class="test-header">
+          <div class="test-title-group">
+            <div class="test-name">${test.testName}</div>
+            <div class="test-meta-info">
+              <div class="meta-item">
+                <span class="label">Class</span>
+                <span class="val">${test.className}</span>
+              </div>
+              <div class="meta-item">
+                <span class="label">Max</span>
+                <span class="val">${test.maxScore}</span>
+              </div>
+              <div class="meta-item">
+                <span class="label">Type</span>
+                <span class="val">${test.type}</span>
+              </div>
+              <div class="meta-item">
+                <span class="label">Held</span>
+                <span class="val">${formatDate(test.heldOn)}</span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn-ghost btn-sm" onclick="handleEditTestDetailsModal('${test.testId}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              Edit
+            </button>
+            <button class="btn-ghost btn-sm" style="color:var(--accent-red);" onclick="handleDeleteTestTracker('${test.testId}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              Delete
+            </button>
+          </div>
+        </div>
+        
+        <div class="test-pipeline">
+          ${state.testSettings.map(stage => {
+      const testStage = test.stages.find(s => s.id === stage.id) || { status: 'pending', actualDate: '' };
+      const plannedDate = new Date(heldOnDate);
+      plannedDate.setDate(heldOnDate.getDate() + stage.offset);
+
+      const isDelayed = testStage.status !== 'done' && new Date() > plannedDate;
+      const statusClass = testStage.status === 'done' ? 'done' : (isDelayed ? 'delayed' : 'pending');
+
+      const collabInfo = testStage.status === 'done'
+        ? `\nDone by: ${testStage.doneBy || 'System'} at ${testStage.doneAt || 'N/A'}`
+        : '';
+
+      // Extract initials for the indicator
+      let indicator = stage.id;
+      if (testStage.status === 'done' && testStage.doneBy) {
+        indicator = testStage.doneBy.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+      } else if (testStage.status === 'done') {
+        indicator = '✓';
+      }
+
+      return `
+              <div class="pipeline-step ${statusClass}" 
+                   onclick="handleToggleTestStage('${test.testId}', ${stage.id})"
+                   title="${stage.label} - Assigned to ${stage.doer}.${collabInfo}\nClick to toggle status.">
+                <div class="step-indicator">
+                  ${indicator}
+                </div>
+                <div class="step-label">${stage.label}</div>
+                <div class="step-date">${formatDate(plannedDate)}</div>
+              </div>
+            `;
+    }).join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function handleToggleTestStage(testId, stageId) {
+  const test = state.tests.find(t => t.testId === testId);
+  if (!test) return;
+
+  const stage = test.stages.find(s => s.id === stageId);
+  const newStatus = (!stage || stage.status !== 'done') ? 'done' : 'pending';
+  const newDate = newStatus === 'done' ? new Date().toISOString() : '';
+  const doneBy = newStatus === 'done' ? state.currentUser : '';
+  const doneAt = newStatus === 'done' ? new Date().toLocaleString() : '';
+
+  try {
+    showToast('Updating stage...', 'info');
+    const res = await apiFetch('updateTestStage', {
+      testId,
+      stageId,
+      status: newStatus,
+      actualDate: newDate,
+      doneBy,
+      doneAt
+    }, 'POST');
+
+    if (res.success) {
+      if (stage) {
+        stage.status = newStatus;
+        stage.actualDate = newDate;
+        stage.doneBy = doneBy;
+        stage.doneAt = doneAt;
+      } else {
+        test.stages.push({
+          id: stageId,
+          status: newStatus,
+          actualDate: newDate,
+          doneBy,
+          doneAt
+        });
+      }
+      renderTests(state.tests);
+      showToast(`${test.testName} updated.`);
+    } else {
+      throw new Error(res.error);
+    }
+  } catch (err) {
+    showToast('Failed to update stage', 'error');
+  }
+}
+
+async function handleDeleteTestTracker(testId) {
+  if (!confirm('Permanently delete this test tracker?')) return;
+
+  try {
+    const res = await apiFetch('deleteTestTracker', { testId }, 'POST');
+    if (res.success) {
+      state.tests = state.tests.filter(t => t.testId !== testId);
+      renderTests(state.tests);
+      showToast('Test tracker deleted.');
+    }
+  } catch (err) {
+    showToast('Failed to delete tracker', 'error');
+  }
+}
+
+// =============================================
+// TEST SETTINGS
+// =============================================
+$('btn-test-settings')?.addEventListener('click', openTestSettingsModal);
+$('test-settings-close-btn')?.addEventListener('click', () => $('test-settings-modal').style.display = 'none');
+$('btn-add-setting-row')?.addEventListener('click', addSettingRow);
+$('btn-save-test-settings')?.addEventListener('click', saveTestSettings);
+
+function openTestSettingsModal() {
+  renderTestSettingsRows();
+  $('test-settings-modal').style.display = 'flex';
+}
+
+function renderTestSettingsRows() {
+  const container = $('test-settings-list');
+  container.innerHTML = state.testSettings.map((s, idx) => `
+    <div class="form-row setting-row" data-index="${idx}" style="align-items: flex-end; margin-bottom: 10px; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 8px;">
+      <div class="form-group" style="flex: 2;">
+        <label>Label</label>
+        <input type="text" class="setting-label" value="${s.label}">
+      </div>
+      <div class="form-group" style="flex: 1;">
+        <label>Offset (Days)</label>
+        <input type="number" class="setting-offset" value="${s.offset}">
+      </div>
+      <div class="form-group" style="flex: 1.5;">
+        <label>Doer</label>
+        <input type="text" class="setting-doer" value="${s.doer}">
+      </div>
+      <button class="btn-ghost" onclick="removeSettingRow(${idx})" style="padding: 10px; color: var(--accent-red);">✕</button>
+    </div>
+  `).join('');
+}
+
+function addSettingRow() {
+  const newId = state.testSettings.length > 0 ? Math.max(...state.testSettings.map(s => s.id)) + 1 : 1;
+  state.testSettings.push({ id: newId, label: 'New Stage', offset: 0, doer: '' });
+  renderTestSettingsRows();
+}
+
+function removeSettingRow(idx) {
+  state.testSettings.splice(idx, 1);
+  renderTestSettingsRows();
+}
+
+async function saveTestSettings() {
+  const rows = document.querySelectorAll('.setting-row');
+  const newSettings = Array.from(rows).map((row, idx) => ({
+    id: state.testSettings[idx]?.id || idx + 1,
+    label: row.querySelector('.setting-label').value.trim(),
+    offset: parseInt(row.querySelector('.setting-offset').value) || 0,
+    doer: row.querySelector('.setting-doer').value.trim()
+  }));
+
+  try {
+    const btn = $('btn-save-test-settings');
+    btn.textContent = 'Saving...';
+    btn.disabled = true;
+
+    const res = await apiFetch('updateTestSettings', { settings: newSettings }, 'POST');
+    if (res.success) {
+      state.testSettings = newSettings;
+      showToast('Configuration saved successfully.');
+      $('test-settings-modal').style.display = 'none';
+      renderTests(state.tests);
+    }
+  } catch (err) {
+    showToast('Failed to save configuration', 'error');
+  } finally {
+    $('btn-save-test-settings').textContent = 'Save Configuration';
+    $('btn-save-test-settings').disabled = false;
+  }
 }
 
 function renderHeader(user, showFab = true) {
@@ -572,7 +843,31 @@ function formatDate(dateStr, timeStr = '') {
 
 function renderTaskCard(task) {
   const isDone = task.status === 'done';
-  const isOverdue = task.status === 'overdue' && task.taskType !== 'daily';
+  
+  // Check for overdue status (even if backend says pending)
+  let isOverdue = task.status === 'overdue';
+  if (!isDone && !isOverdue && task.plannedDate) {
+    const now = new Date();
+    const planned = new Date(task.plannedDate);
+    
+    // Robust local date parsing for YYYY-MM-DD strings
+    if (typeof task.plannedDate === 'string' && task.plannedDate.includes('-')) {
+      const parts = task.plannedDate.split('T')[0].split('-');
+      if (parts.length === 3) {
+        planned.setFullYear(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+      }
+    }
+
+    if (task.time) {
+      const [h, m] = task.time.split(':');
+      planned.setHours(parseInt(h), parseInt(m), 0, 0);
+    } else {
+      planned.setHours(23, 59, 59, 999);
+    }
+    
+    if (now > planned) isOverdue = true;
+  }
+
   const badgeClass = task.taskType === 'daily' ? 'badge-daily' : task.taskType === 'weekly' ? 'badge-weekly' : 'badge-one-time';
   const prioClass = `priority-${(task.priority || 'Medium').toLowerCase()}`;
 
@@ -2211,7 +2506,112 @@ document.addEventListener('click', e => {
   }
   if (e.target.id === 'btn-view-member-tasks') openMemberTasksModal(selectedMember);
   if (e.target.id === 'member-tasks-close-btn') $('member-tasks-modal').style.display = 'none';
+  if (e.target.id === 'btn-add-test') openAddTestModal();
 });
+
+// =============================================
+// TEST TRACKER HANDLERS
+// =============================================
+function openAddTestModal() {
+  $('add-test-form').reset();
+  $('test-form-held-on').value = getTodayStr();
+  $('add-test-modal').style.display = 'flex';
+}
+
+function closeAddTestModal() {
+  $('add-test-modal').style.display = 'none';
+}
+
+$('add-test-close-btn')?.addEventListener('click', closeAddTestModal);
+$('add-test-form')?.addEventListener('submit', handleAddTestSubmit);
+
+async function handleAddTestSubmit(e) {
+  e.preventDefault();
+  const name = $('test-form-name').value.trim();
+  const className = $('test-form-class').value.trim();
+  const maxScore = $('test-form-max').value;
+  const heldOn = $('test-form-held-on').value;
+  const type = $('test-form-type').value;
+
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Starting...';
+
+  try {
+    const res = await apiFetch('addTest', {
+      testName: name,
+      className,
+      maxScore,
+      heldOn,
+      type,
+      stages: state.testSettings.map(s => ({ id: s.id, status: 'pending', actualDate: '' }))
+    }, 'POST');
+
+    if (res.success) {
+      showToast('Test Tracking Started!');
+      closeAddTestModal();
+      openTestTracker(); // Refresh
+    }
+  } catch (err) {
+    showToast('Failed to start tracking', 'error');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Start Tracking';
+  }
+}
+
+let editingTestTrackerId = null;
+
+function handleEditTestDetailsModal(testId) {
+  const test = state.tests.find(t => t.testId === testId);
+  if (!test) return;
+
+  editingTestTrackerId = testId;
+  $('test-form-name').value = test.testName;
+  $('test-form-class').value = test.className;
+  $('test-form-max').value = test.maxScore;
+  $('test-form-held-on').value = test.heldOn.substring(0, 10);
+  $('test-form-type').value = test.type;
+
+  $('add-test-modal').querySelector('h3').textContent = 'Edit Test Details';
+  $('add-test-modal').querySelector('button[type="submit"]').textContent = 'Save Changes';
+
+  // Override form submit for edit mode
+  const form = $('add-test-form');
+  const originalHandler = handleAddTestSubmit;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const payload = {
+      testId: editingTestTrackerId,
+      testName: $('test-form-name').value.trim(),
+      className: $('test-form-class').value.trim(),
+      maxScore: $('test-form-max').value,
+      heldOn: $('test-form-held-on').value,
+      type: $('test-form-type').value
+    };
+
+    try {
+      const res = await apiFetch('editTestDetails', payload, 'POST');
+      if (res.success) {
+        showToast('Test details updated.');
+        closeAddTestModal();
+        openTestTracker();
+      }
+    } catch (err) {
+      showToast('Update failed', 'error');
+    }
+  };
+
+  $('add-test-modal').style.display = 'flex';
+}
+
+// Reset modal when closing
+function closeAddTestModal() {
+  $('add-test-modal').style.display = 'none';
+  $('add-test-modal').querySelector('h3').textContent = 'Track New Test';
+  $('add-test-modal').querySelector('button[type="submit"]').textContent = 'Start Tracking';
+  $('add-test-form').onsubmit = handleAddTestSubmit;
+}
 
 // =============================================
 // MEMBER ACTIONS
@@ -2375,5 +2775,29 @@ async function openMemberTasksModal(name) {
   }
 }
 
+// Synchronization
+function startBackgroundSync() {
+  setInterval(async () => {
+    if (state.currentView === 'tests') {
+      const container = $("test-list-content");
+      // Only refresh if not actively loading to avoid flicker
+      if (container && !container.querySelector('.loading-spinner')) {
+        const [settingsRes, testsRes] = await Promise.all([
+          apiFetch('getTestSettings'),
+          apiFetch('getTests')
+        ]);
+        if (settingsRes.success) state.testSettings = settingsRes.data;
+        if (testsRes.success) state.tests = testsRes.data;
+        renderTests(state.tests);
+      }
+    } else if (state.currentView === 'tasks' && state.currentUser) {
+      initForUser(state.currentUser);
+    }
+  }, 60000); // Sync every 60 seconds
+}
+
 // Initialization
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', () => {
+  init();
+  startBackgroundSync();
+});

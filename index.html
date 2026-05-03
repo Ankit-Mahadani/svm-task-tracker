@@ -132,6 +132,7 @@
       <div class="header-center" id="header-nav" style="display:none;">
         <button class="nav-tab active" id="tab-my-tasks">My Tasks</button>
         <button class="nav-tab" id="tab-team">Team</button>
+        <button class="nav-tab" id="tab-tests">Test Tracker</button>
       </div>
 
       <div class="header-right">
@@ -190,6 +191,23 @@
 
       <!-- Stats Section -->
       <div id="stats-section" style="display:none;"></div>
+    </div>
+
+    <!-- Test Tracker Section -->
+    <div id="test-tracker-container" style="display:none;">
+      <div class="section-header" style="padding: 0 var(--space-md); display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="font-size:1.2rem; font-weight:700;">Test Progress Tracker</h2>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn-secondary btn-sm" id="btn-test-settings" style="width:auto; display: flex; align-items: center; gap: 5px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1V15a2 2 0 0 1-2-2 2 2 0 0 1 2-2v-.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2v.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            Settings
+          </button>
+          <button class="btn-primary btn-sm" id="btn-add-test" style="width:auto;">+ Add Test</button>
+        </div>
+      </div>
+      <div id="test-list-content" class="dashboard-content" style="padding-top: var(--space-sm);">
+        <!-- Tests will be rendered here -->
+      </div>
     </div>
 
     <!-- Admin Dashboard Section -->
@@ -420,9 +438,67 @@
     </div>
   </div>
 
+  <!-- Add Test Modal -->
+  <div class="modal-overlay" id="add-test-modal" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Track New Test</h3>
+        <button class="modal-close" id="add-test-close-btn" aria-label="Close">✕</button>
+      </div>
+      <form id="add-test-form">
+        <div class="form-group">
+          <label for="test-form-name">Test Name</label>
+          <input type="text" id="test-form-name" placeholder="e.g. Maths - Chapter 1" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="test-form-class">Class</label>
+            <input type="text" id="test-form-class" placeholder="e.g. 10">
+          </div>
+          <div class="form-group">
+            <label for="test-form-max">Max Score</label>
+            <input type="number" id="test-form-max" placeholder="e.g. 50">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="test-form-held-on">Held On</label>
+            <input type="date" id="test-form-held-on" required>
+          </div>
+          <div class="form-group">
+            <label for="test-form-type">Type</label>
+            <select id="test-form-type">
+              <option value="Sheet">Sheet (Paper)</option>
+              <option value="App">App (Classpro)</option>
+            </select>
+          </div>
+        </div>
+        <button type="submit" class="btn-primary">Start Tracking</button>
+      </form>
+    </div>
+  </div>
+
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Supabase JS Client -->
+  <!-- Test Settings Modal -->
+  <div class="modal-overlay" id="test-settings-modal" style="display:none;">
+    <div class="modal-card modal-card-lg">
+      <div class="modal-header">
+        <h3>Test Tracker Settings</h3>
+        <button class="modal-close" id="test-settings-close-btn">✕</button>
+      </div>
+      <p class="modal-body-text">Configure the stages for the test tracker pipeline. These stages will apply to all tests.</p>
+      <div id="test-settings-list" style="max-height: 400px; overflow-y: auto; margin-bottom: var(--space-md); padding-right: 5px;">
+        <!-- Settings rows will be rendered here -->
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn-ghost" id="btn-add-setting-row">+ Add Stage</button>
+        <button class="btn-primary" id="btn-save-test-settings" style="flex: 1;">Save Configuration</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
   <!-- Member Actions Modal -->
   <div class="modal-overlay" id="member-actions-modal" style="display:none;">
