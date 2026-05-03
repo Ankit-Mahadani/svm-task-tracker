@@ -31,11 +31,26 @@ self.addEventListener('activate', (e) => {
 
 // Fetch Event
 self.addEventListener('fetch', (e) => {
-  // Only cache GET requests
+  const url = new URL(e.request.url);
+  
+  // Skip interception for API calls (Apps Script)
+  if (url.hostname === 'script.google.com' || url.hostname === 'script.googleusercontent.com') {
+    return;
+  }
+
+  // Only cache GET requests for local assets
   if (e.request.method !== 'GET') return;
   
   // Network first, then cache
   e.respondWith(
-    fetch(e.request).catch(() => caches.match(e.request))
+    fetch(e.request).catch(async () => {
+      const match = await caches.match(e.request);
+      if (match) return match;
+      // If no cache, return a basic error response or just let it fail
+      return new Response('Network error and no cache available', {
+        status: 408,
+        headers: { 'Content-Type': 'text/plain' }
+      });
+    })
   );
 });

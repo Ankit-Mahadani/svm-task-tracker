@@ -7,7 +7,7 @@
 // =============================================
 const CONFIG = {
   //  REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbz5S3PFryWY2sNy_Yp3Ek2szRxSAzseKkIiheMDEj8b83IRTI1C2MwVgVrSLb5A8x7w/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbyQHRXDoXo3GwCuExLW5uHcdhA1bY5bgUibkanBL5poMzjcIqsOlXtk993fzNZv8RbX/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
@@ -388,8 +388,14 @@ function handleUserSignedOut() {
 }
 
 function handleUserSignedIn(userData) {
+  // Safety check for userData
+  if (!userData || !userData.name) {
+    handleUserSignedOut();
+    return;
+  }
+
   state.currentUser = userData.name;
-  state.userRole = userData.role.toLowerCase();
+  state.userRole = (userData.role || 'member').toLowerCase();
 
   // Save session
   localStorage.setItem('svm_session', JSON.stringify(userData));
@@ -399,19 +405,21 @@ function handleUserSignedIn(userData) {
   $('header-add-task').style.display = 'flex';
 
   // Show navigation tabs to all roles (Admin, Coordinator, Member)
-  $('header-nav').style.display = 'flex';
-
-  // Only Admin and Coordinator can see the "Team" (Dashboard) tab
-  if (state.userRole === 'admin' || state.userRole === 'coordinator') {
-    $('tab-team').style.display = 'block';
-  } else {
-    $('tab-team').style.display = 'none';
+  const nav = $('header-nav');
+  if (nav) {
+    nav.style.display = 'flex';
+    // Only Admin and Coordinator can see the "Team" (Dashboard) tab
+    const teamTab = $('tab-team');
+    if (teamTab) {
+      teamTab.style.display = (state.userRole === 'admin' || state.userRole === 'coordinator') ? 'block' : 'none';
+    }
   }
 
   state.currentView = 'tasks';
-  $('admin-dashboard-container').style.display = 'none';
-  $('test-tracker-container').style.display = 'none';
-  $('task-view-container').style.display = 'block';
+  if ($('admin-dashboard-container')) $('admin-dashboard-container').style.display = 'none';
+  if ($('test-tracker-container')) $('test-tracker-container').style.display = 'none';
+  if ($('task-view-container')) $('task-view-container').style.display = 'block';
+
   renderHeader(state.currentUser);
   initForUser(state.currentUser);
 
@@ -513,11 +521,11 @@ function renderTests(tests) {
           </div>
         </div>
         
-        <div class="test-pipeline">
-          ${state.testSettings.map(stage => {
-      const testStage = test.stages.find(s => s.id === stage.id) || { status: 'pending', actualDate: '' };
+          ${(state.testSettings || []).map(stage => {
+      const stages = test.stages || [];
+      const testStage = stages.find(s => s.id === stage.id) || { status: 'pending', actualDate: '' };
       const plannedDate = new Date(heldOnDate);
-      plannedDate.setDate(heldOnDate.getDate() + stage.offset);
+      plannedDate.setDate(heldOnDate.getDate() + (stage.offset || 0));
 
       const isDelayed = testStage.status !== 'done' && new Date() > plannedDate;
       const statusClass = testStage.status === 'done' ? 'done' : (isDelayed ? 'delayed' : 'pending');
@@ -537,16 +545,15 @@ function renderTests(tests) {
       return `
               <div class="pipeline-step ${statusClass}" 
                    onclick="handleToggleTestStage('${test.testId}', ${stage.id})"
-                   title="${stage.label} - Assigned to ${stage.doer}.${collabInfo}\nClick to toggle status.">
+                   title="${stage.label || 'Step'} - Assigned to ${stage.doer || 'Unassigned'}.${collabInfo}\nClick to toggle status.">
                 <div class="step-indicator">
                   ${indicator}
                 </div>
-                <div class="step-label">${stage.label}</div>
+                <div class="step-label">${stage.label || 'Step'}</div>
                 <div class="step-date">${formatDate(plannedDate)}</div>
               </div>
             `;
     }).join('')}
-        </div>
       </div>
     `;
   }).join('');
@@ -843,13 +850,14 @@ function formatDate(dateStr, timeStr = '') {
 
 function renderTaskCard(task) {
   const isDone = task.status === 'done';
-  
+  const isMissed = task.status === 'missed';
+
   // Check for overdue status (even if backend says pending)
-  let isOverdue = task.status === 'overdue';
+  let isOverdue = task.status === 'overdue' || isMissed;
   if (!isDone && !isOverdue && task.plannedDate) {
     const now = new Date();
     const planned = new Date(task.plannedDate);
-    
+
     // Robust local date parsing for YYYY-MM-DD strings
     if (typeof task.plannedDate === 'string' && task.plannedDate.includes('-')) {
       const parts = task.plannedDate.split('T')[0].split('-');
@@ -864,8 +872,12 @@ function renderTaskCard(task) {
     } else {
       planned.setHours(23, 59, 59, 999);
     }
-    
-    if (now > planned) isOverdue = true;
+
+    // Align with backend: 0 grace for daily, 24h for others
+    const graceMs = (task.taskType === 'daily') ? 0 : (24 * 60 * 60 * 1000);
+    if (now.getTime() > (planned.getTime() + graceMs)) {
+      isOverdue = true;
+    }
   }
 
   const badgeClass = task.taskType === 'daily' ? 'badge-daily' : task.taskType === 'weekly' ? 'badge-weekly' : 'badge-one-time';
@@ -876,7 +888,7 @@ function renderTaskCard(task) {
   if (displayPriority.includes('-') || displayPriority.includes(':')) displayPriority = 'Medium';
 
   return `
-    <div class="task-card ${isDone ? 'done' : ''} ${isOverdue ? 'overdue' : ''}" 
+    <div class="task-card ${isDone ? 'done' : ''} ${isOverdue ? 'overdue' : ''} ${isMissed ? 'missed' : ''}" 
          data-task-id="${task.taskId}" 
          id="task-${task.taskId}">
       <div class="task-checkbox">
@@ -888,7 +900,7 @@ function renderTaskCard(task) {
           <span class="task-badge ${badgeClass}">${task.taskType}</span>
           <span class="priority-badge ${prioClass}">${displayPriority}</span>
           ${task.plannedDate ? `<span class="task-date-text" style="color:var(--text-dim); font-size:0.75rem;">• ${formatDate(task.plannedDate, task.time)}</span>` : ''}
-          ${isOverdue ? '<span class="task-badge badge-overdue">overdue</span>' : ''}
+          ${isOverdue ? `<span class="task-badge badge-overdue">${isMissed || task.taskType === 'daily' ? 'missed' : 'overdue'}</span>` : ''}
           ${isDone && task.completedDate ? `<span>Done at ${formatTime(task.completedDate)}</span>` : ''}
           ${task.comments && task.comments.length > 0 ? `
             <span class="comment-indicator" title="${task.comments.length} comments">
@@ -902,7 +914,7 @@ function renderTaskCard(task) {
         <button class="task-comment-btn" data-comment-id="${task.taskId}" title="Comments" aria-label="Task comments">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 1 1-7.6-13.5 8.38 8.38 0 0 1 3.8.9L21 3z"></path></svg>
         </button>
-        ${!isDone ? `<button class="task-shift-btn" data-shift-id="${task.taskId}" title="Shift task" aria-label="Shift task">
+        ${(!isDone && !isMissed && !isOverdue) ? `<button class="task-shift-btn" data-shift-id="${task.taskId}" title="Shift task" aria-label="Shift task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
         </button>` : ''}
         ${(state.userRole === 'admin' || state.userRole === 'coordinator' || task.assignedTo === state.currentUser) ? `
@@ -1416,12 +1428,14 @@ async function init() {
 
   try {
     const teamRes = await apiFetch('getTeam');
-    state.teamMembers = teamRes.data;
+    state.teamMembers = teamRes.data || [];
   } catch (err) {
     console.error('Could not load team data:', err);
+    if (CONFIG.DEMO_MODE) state.teamMembers = MOCK_TEAM;
+  } finally {
+    const loader = $('loading-screen');
+    if (loader) loader.classList.add('hidden');
   }
-
-  $('loading-screen').classList.add('hidden');
 
   // Check for local session
   const savedSession = localStorage.getItem('svm_session');
@@ -2796,8 +2810,28 @@ function startBackgroundSync() {
   }, 60000); // Sync every 60 seconds
 }
 
+// Global Error Handling
+window.onerror = function (msg, url, lineNo, columnNo, error) {
+  console.error('Production Error:', msg, 'at', lineNo + ':' + columnNo);
+  const loader = document.getElementById('loading-screen');
+  if (loader) loader.classList.add('hidden');
+  return false;
+};
+
+window.onunhandledrejection = function (event) {
+  console.error('Unhandled Promise Rejection:', event.reason);
+  const loader = document.getElementById('loading-screen');
+  if (loader) loader.classList.add('hidden');
+};
+
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
-  init();
-  startBackgroundSync();
+  try {
+    init();
+    startBackgroundSync();
+  } catch (err) {
+    console.error('Initialization failed:', err);
+    const loader = document.getElementById('loading-screen');
+    if (loader) loader.classList.add('hidden');
+  }
 });
