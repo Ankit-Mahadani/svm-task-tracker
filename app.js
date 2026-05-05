@@ -1281,7 +1281,7 @@ function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []
     // KPI Row
     const totalAssigned = scores.reduce((sum, s) => sum + (s.tasksAssigned || 0), 0);
     const totalComp = scores.reduce((sum, s) => sum + (s.tasksCompleted || 0), 0);
-    const rate = totalAssigned > 0 ? Math.round((totalComp / totalAssigned) * 100) : 0;
+    const rate = totalAssigned > 0 ? Math.min(100, Math.round((totalComp / totalAssigned) * 100)) : 0;
 
     const kpiRow = document.createElement('div');
     kpiRow.className = 'kpi-grid';
@@ -1329,7 +1329,7 @@ function createDashboardCardHTML(s, rank) {
   const comp = s.tasksCompleted || 0;
   const late = s.tasksLate || 0;
   const miss = s.tasksMissed || 0;
-  const compPct = total > 0 ? (comp / total * 100) : 0;
+  const compPct = total > 0 ? Math.min(100, (comp / total * 100)) : 0;
   const rankClass = rank <= 3 ? `rank-${rank}-card` : '';
 
   return `
