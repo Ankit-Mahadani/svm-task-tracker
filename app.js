@@ -7,7 +7,7 @@
 // =============================================
 const CONFIG = {
   //  REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbyQHRXDoXo3GwCuExLW5uHcdhA1bY5bgUibkanBL5poMzjcIqsOlXtk993fzNZv8RbX/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbxI9YehS3l7nCTDeuRNUXpYIV2E1WXPknebK8VZD_KhjP7Y_LdZNXcv9W-Wbv6JhZTI/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
@@ -411,11 +411,15 @@ function handleUserSignedIn(userData) {
     // Only Admin and Coordinator can see the "Team" (Dashboard) tab
     const teamTab = $('tab-team');
     if (teamTab) {
-      teamTab.style.display = (state.userRole === 'admin' || state.userRole === 'coordinator') ? 'block' : 'none';
+      const allowedRoles = ['admin', 'coordinator', 'process_coordinator'];
+      teamTab.style.display = allowedRoles.includes(state.userRole) ? 'block' : 'none';
     }
   }
 
   state.currentView = 'tasks';
+  state.tasksFilterUser = null;
+  state.currentGlobalView = false;
+  if ($('monitoring-header')) $('monitoring-header').style.display = 'none';
   if ($('admin-dashboard-container')) $('admin-dashboard-container').style.display = 'none';
   if ($('test-tracker-container')) $('test-tracker-container').style.display = 'none';
   if ($('task-view-container')) $('task-view-container').style.display = 'block';
@@ -426,10 +430,16 @@ function handleUserSignedIn(userData) {
   // Bind tab events
   $('tab-my-tasks').onclick = () => {
     state.currentView = 'tasks';
+    state.tasksFilterUser = null;
+    state.currentGlobalView = false;
     setActiveTab('tab-my-tasks');
+    if ($('monitoring-header')) $('monitoring-header').style.display = 'none';
     $('task-view-container').style.display = 'block';
     $('admin-dashboard-container').style.display = 'none';
     $('test-tracker-container').style.display = 'none';
+    $('stats-section').style.display = 'block';
+    $('briefing-section').style.display = 'block';
+    initForUser(state.currentUser);
   };
   $('tab-team').onclick = () => {
     setActiveTab('tab-team');
@@ -490,7 +500,7 @@ function renderTests(tests) {
       const stages = test.stages || [];
       const testStage = stages.find(s => s.id === stage.id) || { status: 'pending' };
       if (testStage.status === 'done') return false;
-      
+
       const pDate = new Date(heldOnDate);
       pDate.setDate(heldOnDate.getDate() + (stage.offset || 0));
       pDate.setHours(23, 59, 59, 999); // End of day check
@@ -865,41 +875,33 @@ function formatDate(dateStr, timeStr = '') {
 function renderTaskCard(task) {
   const isDone = task.status === 'done';
   const isMissed = task.status === 'missed';
+  const isInProgress = task.status === 'in-progress';
+  const isStuck = task.status === 'stuck';
 
-  // Check for overdue status (even if backend says pending)
+  // Check for overdue status
   let isOverdue = task.status === 'overdue' || isMissed;
   if (!isDone && !isOverdue && task.plannedDate) {
     const now = new Date();
     const planned = new Date(task.plannedDate);
-
-    // Robust local date parsing for YYYY-MM-DD strings
     if (typeof task.plannedDate === 'string' && task.plannedDate.includes('-')) {
       const parts = task.plannedDate.split('T')[0].split('-');
-      if (parts.length === 3) {
-        planned.setFullYear(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-      }
+      if (parts.length === 3) planned.setFullYear(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
     }
-
     if (task.time) {
       const [h, m] = task.time.split(':');
       planned.setHours(parseInt(h), parseInt(m), 0, 0);
-    } else {
-      planned.setHours(23, 59, 59, 999);
-    }
-
-    // Align with backend: 0 grace for daily, 24h for others
+    } else planned.setHours(23, 59, 59, 999);
     const graceMs = (task.taskType === 'daily') ? 0 : (24 * 60 * 60 * 1000);
-    if (now.getTime() > (planned.getTime() + graceMs)) {
-      isOverdue = true;
-    }
+    if (now.getTime() > (planned.getTime() + graceMs)) isOverdue = true;
   }
 
   const badgeClass = task.taskType === 'daily' ? 'badge-daily' : task.taskType === 'weekly' ? 'badge-weekly' : 'badge-one-time';
   const prioClass = `priority-${(task.priority || 'Medium').toLowerCase()}`;
-
-  // Clean priority if it looks like a date (bug fix)
   let displayPriority = task.priority || 'Medium';
   if (displayPriority.includes('-') || displayPriority.includes(':')) displayPriority = 'Medium';
+
+  const isProcessCoord = state.userRole === 'process_coordinator';
+  const isAdminOrCoord = state.userRole === 'admin' || state.userRole === 'coordinator' || isProcessCoord;
 
   return `
     <div class="task-card ${isDone ? 'done' : ''} ${isOverdue ? 'overdue' : ''} ${isMissed ? 'missed' : ''}" 
@@ -913,29 +915,43 @@ function renderTaskCard(task) {
         <div class="task-meta">
           <span class="task-badge ${badgeClass}">${task.taskType}</span>
           <span class="priority-badge ${prioClass}">${displayPriority}</span>
-          ${task.plannedDate ? `<span class="task-date-text" style="color:var(--text-dim); font-size:0.75rem;">• ${formatDate(task.plannedDate, task.time)}</span>` : ''}
-          ${isOverdue ? `<span class="task-badge badge-overdue">${isMissed || task.taskType === 'daily' ? 'missed' : 'overdue'}</span>` : ''}
-          ${isDone && task.completedDate ? `<span>Done at ${formatTime(task.completedDate)}</span>` : ''}
-          ${task.comments && task.comments.length > 0 ? `
-            <span class="comment-indicator" title="${task.comments.length} comments">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 1 1-7.6-13.5 8.38 8.38 0 0 1 3.8.9L21 3z"></path></svg>
-              ${task.comments.length}
+          ${task.assignedTo && (isAdminOrCoord || state.currentView === 'tasks') ? `
+            <span style="color:var(--accent-purple); font-weight:600;">
+              @${task.assignedTo} ${task.assignedTo !== state.currentUser && !state.tasksFilterUser ? '(Buddy Task)' : ''}
             </span>
           ` : ''}
+          ${task.plannedDate ? `<span class="task-date-text" style="color:var(--text-dim); font-size:0.75rem;">• ${formatDate(task.plannedDate, task.time)}</span>` : ''}
+          ${isOverdue ? `<span class="task-badge badge-overdue">${isMissed || task.taskType === 'daily' ? 'missed' : 'overdue'}</span>` : ''}
+          ${isInProgress ? `<span class="task-badge badge-in-progress">in progress</span>` : ''}
+          ${isStuck ? `<span class="task-badge badge-stuck">stuck</span>` : ''}
+          ${isDone && task.completedDate ? `<span>Done at ${formatTime(task.completedDate)}</span>` : ''}
         </div>
       </div>
       <div class="task-actions">
+        ${isProcessCoord ? `
+          <button class="task-nudge-btn" onclick="handleNudgeMember('${task.taskId}', '${task.assignedTo}', event)" title="Nudge Member" style="background:none; border:none; color:var(--accent-purple); cursor:pointer; padding:4px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+          </button>
+        ` : ''}
         <button class="task-comment-btn" data-comment-id="${task.taskId}" title="Comments" aria-label="Task comments">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 1 1-7.6-13.5 8.38 8.38 0 0 1 3.8.9L21 3z"></path></svg>
         </button>
+        ${(!isDone && !isMissed && !isOverdue) ? `
+          <button onclick="handleUpdateTaskStatus('${task.taskId}', 'in-progress', event)" title="Mark In Progress" style="background:none; border:none; color:var(--accent-blue); cursor:pointer; padding:4px; display:flex; align-items:center;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path></svg>
+          </button>
+          <button onclick="handleUpdateTaskStatus('${task.taskId}', 'stuck', event)" title="Mark Stuck" style="background:none; border:none; color:var(--accent-amber); cursor:pointer; padding:4px; display:flex; align-items:center;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>
+          </button>
+        ` : ''}
         ${(!isDone && !isMissed && !isOverdue) ? `<button class="task-shift-btn" data-shift-id="${task.taskId}" title="Shift task" aria-label="Shift task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
         </button>` : ''}
-        ${(state.userRole === 'admin' || state.userRole === 'coordinator' || task.assignedTo === state.currentUser) ? `
+        ${(isAdminOrCoord || task.assignedTo === state.currentUser) ? `
         <button class="task-edit-btn" data-edit-id="${task.taskId}" title="Edit task" aria-label="Edit task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
         </button>` : ''}
-        ${(state.userRole === 'admin' || state.userRole === 'coordinator') ? `
+        ${(isAdminOrCoord || task.assignedTo === state.currentUser) ? `
         <button class="task-delete-btn" data-delete-id="${task.taskId}" title="Delete task" aria-label="Delete task">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
         </button>
@@ -961,6 +977,14 @@ function toggleTheme() {
 
 function renderStats(stats) {
   const section = $('stats-section');
+  if (!section) return;
+
+  // Hide stats if viewing someone else's tasks or in global view
+  if (state.tasksFilterUser || state.currentGlobalView || state.currentView !== 'tasks') {
+    section.style.display = 'none';
+    return;
+  }
+
   const completedToday = state.tasks.filter(t => t.status === 'done').length;
   const totalToday = state.tasks.length;
   const pct = totalToday > 0 ? Math.round((completedToday / totalToday) * 100) : 0;
@@ -1016,11 +1040,15 @@ async function openDashboard() {
   if (content) content.innerHTML = '<div class="loading-spinner" style="margin: 3rem auto;"></div>';
 
   try {
-    const [scoresRes, teamRes, leavesRes, perfRes] = await Promise.all([
+    const [scoresRes, teamRes, leavesRes, perfRes, healthRes, modRes] = await Promise.all([
       apiFetch('getScores').catch(() => ({ success: true, data: [] })),
       apiFetch('getTeam').catch(() => ({ success: true, data: [] })),
       apiFetch('getLeaves').catch(() => ({ success: true, data: [] })),
-      apiFetch('getTeamPerformance').catch(() => ({ success: true, data: [] }))
+      apiFetch('getTeamPerformance').catch(() => ({ success: true, data: [] })),
+      (state.userRole === 'admin' || state.userRole === 'process_coordinator')
+        ? apiFetch('getWorkflowHealth').catch(() => ({ success: true, data: null }))
+        : Promise.resolve({ success: true, data: null }),
+      apiFetch('getPendingModifications').catch(() => ({ success: true, data: [] }))
     ]);
 
     const scoresMap = new Map();
@@ -1048,17 +1076,120 @@ async function openDashboard() {
       });
     }
 
-    renderDashboard(mergedScores, pendingMembers, leavesRes.data || [], perfRes.data || []);
+    console.log('Dashboard Data Fetched:', {
+      scores: mergedScores.length,
+      pendingMembers: pendingMembers.length,
+      leaves: leavesRes.data ? leavesRes.data.length : 0,
+      modifications: modRes.data ? modRes.data.length : 0
+    });
+
+    renderDashboard(mergedScores, pendingMembers, leavesRes.data || [], perfRes.data || [], healthRes.data, modRes.data || []);
+
+    // Update tab badge
+    const totalPending = (modRes.data ? modRes.data.length : 0) + pendingMembers.length + (leavesRes.data ? leavesRes.data.filter(l => l.status === 'pending').length : 0);
+    const teamBadge = $('team-badge');
+    if (teamBadge) {
+      if (totalPending > 0) {
+        teamBadge.style.display = 'block';
+        teamBadge.textContent = totalPending;
+      } else {
+        teamBadge.style.display = 'none';
+      }
+    }
   } catch (err) {
     console.error('Dashboard error:', err);
     if (content) content.innerHTML = '<div class="empty-state">Failed to load dashboard data. Please try again.</div>';
   }
 }
 
-function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []) {
+function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = [], healthData = null, modifications = []) {
   const container = $('dashboard-content');
   if (!container) return;
   container.innerHTML = '';
+
+  // Show User Role for verification
+  const roleDisplay = document.createElement('div');
+  roleDisplay.style = 'font-size:0.7rem; color:var(--text-muted); margin-bottom:10px; text-transform:uppercase; letter-spacing:0.05em;';
+  roleDisplay.textContent = `Active Role: ${state.userRole}`;
+  container.appendChild(roleDisplay);
+
+  // 1. TASK MODIFICATION REQUESTS (TOP PRIORITY)
+  if (state.userRole === 'admin' || state.userRole === 'coordinator' || state.userRole === 'process_coordinator') {
+    const modSec = document.createElement('div');
+    modSec.className = 'dashboard-section';
+    modSec.style.marginBottom = '30px';
+
+    let modHtml = `<h3 style="margin-bottom:15px; font-size:1.1rem; color:var(--accent-purple); display:flex; align-items:center; gap:10px;">
+                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                     Task Change Approvals
+                     ${modifications.length > 0 ? `<span class="badge-count" style="animation: pulse-scale 2s infinite;">${modifications.length}</span>` : ''}
+                   </h3>`;
+
+    if (modifications.length > 0) {
+      modHtml += `<div class="pending-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:15px;">
+        ${modifications.map(m => `
+          <div class="kpi-card" style="padding:15px; border-top:3px solid var(--accent-purple); box-shadow: 0 4px 20px rgba(168, 85, 247, 0.1);">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+              <div>
+                <div style="font-weight:700; color:var(--text-primary); font-size:0.95rem;">${m.taskName}</div>
+                <div style="font-size:0.75rem; color:var(--text-muted);">From: <span style="color:var(--accent-purple); font-weight:600;">${m.requestedBy}</span></div>
+              </div>
+              <span class="task-badge ${m.type === 'delete' ? 'badge-overdue' : 'badge-in-progress'}" style="padding:2px 8px; font-size:0.6rem; border-radius:12px; letter-spacing:0.05em;">${m.type.toUpperCase()}</span>
+            </div>
+            ${m.type === 'edit' ? `
+              <div style="font-size:0.75rem; color:var(--text-muted); background:rgba(168,85,247,0.05); padding:10px; border-radius:6px; border:1px solid rgba(168,85,247,0.1);">
+                <div style="color:var(--accent-purple); font-weight:700; margin-bottom:6px; font-size:0.65rem; text-transform:uppercase; letter-spacing:0.05em;">New Values:</div>
+                <div style="display:grid; grid-template-columns: 70px 1fr; gap:6px;">
+                  <span>Task:</span> <span style="color:var(--text-primary); font-weight:600;">${m.newData.taskName}</span>
+                  <span>Type:</span> <span style="color:var(--text-primary);">${m.newData.taskType}</span>
+                  <span>Due:</span> <span style="color:var(--text-primary);">${m.newData.plannedDate}</span>
+                </div>
+              </div>
+            ` : `
+              <div style="font-size:0.75rem; color:var(--accent-red); padding:10px; background:rgba(239,68,68,0.05); border-radius:6px; border:1px solid rgba(239,68,68,0.1); display:flex; align-items:center; gap:8px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                Requesting permanent deletion.
+              </div>
+            `}
+            <div style="display:flex; gap:10px; margin-top:15px;">
+              <button class="btn-success btn-sm approve-mod-btn" data-id="${m.id}" style="flex:1; padding:10px; font-size:0.8rem;">Approve</button>
+              <button class="btn-danger btn-sm reject-mod-btn" data-id="${m.id}" style="flex:1; padding:10px; font-size:0.8rem; background:none; border:1px solid rgba(239,68,68,0.3); color:var(--accent-red);">Reject</button>
+            </div>
+          </div>`).join('')}
+      </div>`;
+    } else {
+      modHtml += `<div style="padding:30px; text-align:center; color:var(--text-dim); border:2px dashed var(--border-glass); border-radius:var(--radius-lg); font-size:0.85rem; background:rgba(255,255,255,0.02);">
+                    <div style="font-size:1.5rem; margin-bottom:10px; opacity:0.3;">📋</div>
+                    No pending task change requests.
+                  </div>`;
+    }
+    modSec.innerHTML = modHtml;
+    container.appendChild(modSec);
+  }
+
+  // 0. Workflow Health (Process Coordinator & Admin)
+  if (healthData && (state.userRole === 'admin' || state.userRole === 'process_coordinator')) {
+    const healthSec = document.createElement('div');
+    healthSec.className = 'workflow-health-card';
+    healthSec.innerHTML = `
+      <h3 style="margin-bottom:15px; font-size:1rem; color:var(--accent-purple);">Workflow Health Report</h3>
+      <div class="health-item">
+        <span class="health-label">Stuck Tasks</span>
+        <span class="health-value ${healthData.stuckTasks > 0 ? 'danger' : 'good'}">${healthData.stuckTasks}</span>
+      </div>
+      <div class="health-item">
+        <span class="health-label">Long-overdue Tasks (>48h)</span>
+        <span class="health-value ${healthData.longOverdue > 2 ? 'danger' : healthData.longOverdue > 0 ? 'warning' : 'good'}">${healthData.longOverdue}</span>
+      </div>
+      <div class="health-item">
+        <span class="health-label">Bottleneck Members (≥3 Overdue)</span>
+        <span class="health-value ${healthData.bottleneckUsers.length > 0 ? 'warning' : 'good'}">
+          ${healthData.bottleneckUsers.length > 0 ? healthData.bottleneckUsers.join(', ') : 'None'}
+        </span>
+      </div>
+    `;
+    container.appendChild(healthSec);
+  }
 
   // 0. Admin Actions Bar
   if (state.userRole === 'admin') {
@@ -1066,18 +1197,35 @@ function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []
     adminActions.className = 'admin-actions-bar';
     adminActions.style = 'display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;';
     adminActions.innerHTML = `
-      <button class="btn-primary" id="btn-generate-recurring">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-        Generate Recurring Tasks
-      </button>
       <button class="btn-secondary" id="btn-reset-passwords">Reset All Passwords</button>
     `;
     container.appendChild(adminActions);
-    $('btn-generate-recurring')?.addEventListener('click', handleManualGenerateTasks);
     $('btn-reset-passwords')?.addEventListener('click', handleResetAllPasswords);
   }
 
-  // 1. Pending Approvals & Leaves (Admin only)
+  // Process Coordinator Actions
+  if (state.userRole === 'process_coordinator') {
+    const processActions = document.createElement('div');
+    processActions.className = 'admin-actions-bar';
+    processActions.style = 'display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;';
+    processActions.innerHTML = `
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; width:100%;">
+        <button class="btn-primary" id="btn-view-all-tasks" style="justify-content:center;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          View All
+        </button>
+        <button class="btn-secondary" id="btn-add-global-task" style="justify-content:center;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Add Task
+        </button>
+      </div>
+    `;
+    container.appendChild(processActions);
+    $('btn-view-all-tasks')?.addEventListener('click', () => handleViewAllTasks());
+    $('btn-add-global-task')?.addEventListener('click', () => openAddTaskModal());
+  }
+
+  // 2. Pending Approvals & Leaves (Admin only)
   if (state.userRole === 'admin') {
     const pendingSec = document.createElement('div');
     pendingSec.className = 'dashboard-section';
@@ -1086,9 +1234,18 @@ function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []
     if (pendingMembers.length > 0) {
       html += `<h3 style="margin-bottom:15px; font-size:1rem; color:var(--accent-amber);">Pending Approvals (${pendingMembers.length})</h3>
                <div class="pending-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:15px; margin-bottom:20px;">
-                 ${pendingMembers.map(m => `<div class="kpi-card" style="display:flex; justify-content:space-between; align-items:center; padding:15px;">
-                   <div><div style="font-weight:600;">${m.name}</div><div style="font-size:0.75rem; color:var(--text-muted);">${m.email}</div></div>
-                   <div style="display:flex; gap:8px;"><button class="btn-success btn-sm approve-member-btn" data-email="${m.email}">Approve</button></div>
+                 ${pendingMembers.map(m => `<div class="kpi-card" style="display:flex; justify-content:space-between; align-items:center; padding:15px; border:1px solid var(--border-glass);">
+                   <div><div style="font-weight:600; color:var(--text-primary);">${m.name}</div><div style="font-size:0.75rem; color:var(--text-muted);">${m.email}</div></div>
+                   <div style="display:flex; gap:10px;">
+                     <button class="btn-success btn-sm approve-member-btn" data-email="${m.email}" style="display:flex; align-items:center; gap:6px;">
+                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                       Approve
+                     </button>
+                     <button class="btn-danger btn-sm reject-member-btn" data-email="${m.email}" style="display:flex; align-items:center; gap:6px; background:none; border:1px solid rgba(239,68,68,0.3); color:var(--accent-red);">
+                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                       Reject
+                     </button>
+                   </div>
                  </div>`).join('')}
                </div>`;
     }
@@ -1099,7 +1256,10 @@ function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []
                <div class="pending-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:15px;">
                  ${pendingLeaves.map(l => `<div class="kpi-card" style="padding:15px;">
                    <div style="display:flex; justify-content:space-between;"><strong>${l.user}</strong><span style="font-size:0.75rem;">${l.startDate}</span></div>
-                   <div style="font-size:0.85rem; color:var(--text-muted); margin:8px 0;">${l.reason}</div>
+                   <div style="font-size:0.85rem; color:var(--text-muted); margin:8px 0;">
+                     ${l.reason || 'No reason provided'}
+                     ${l.taskBuddy ? `<div style="margin-top:4px; color:var(--accent-purple); font-weight:600;">Buddy: ${l.taskBuddy}</div>` : ''}
+                   </div>
                    <div style="display:flex; gap:8px;"><button class="btn-success btn-sm approve-leave-btn" data-user="${l.user}" data-created="${l.createdAt}">Approve</button></div>
                  </div>`).join('')}
                </div>`;
@@ -1153,6 +1313,7 @@ function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []
 
   bindApprovalEvents();
   bindLeaveApprovalEvents();
+  bindModificationEvents();
 
   // Animation trigger
   setTimeout(() => {
@@ -1176,7 +1337,12 @@ function createDashboardCardHTML(s, rank) {
       <div class="dashboard-card-header">
         <div class="dashboard-rank rank-${rank}">${rank}</div>
         <div class="avatar avatar-sm">${getInitials(s.name)}</div>
-        <div class="dashboard-card-name" onclick="openAddTaskForMember('${s.name}')" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; flex:1;">${s.name}</div>
+        <div class="dashboard-card-name" onclick="handleViewMemberTasks('${s.name}')" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${s.name}">${s.name}</div>
+        ${state.userRole === 'admin' ? `
+          <button onclick="handleRemoveMemberPrompt('${s.name}', event)" class="member-remove-btn" title="Remove Member">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          </button>
+        ` : ''}
         <div class="dashboard-card-score">
           ${s.score || 0}
           <span class="trend-up" style="font-size: 0.7rem; color: var(--accent-emerald); margin-left: 4px;">↑</span>
@@ -1349,6 +1515,166 @@ async function handleTaskComplete(taskId) {
   }
 }
 
+async function handleUpdateTaskStatus(taskId, status, event) {
+  if (event) event.stopPropagation();
+  try {
+    const task = state.tasks.find(t => t.taskId === taskId);
+    if (task) task.status = status;
+
+    renderTasks(state.tasks);
+    showToast(`Status updated to ${status}`);
+
+    await apiFetch('updateTaskStatus', { taskId, status }, 'POST');
+  } catch (err) {
+    console.error('Failed to update status:', err);
+    showToast('Failed to update status', 'error');
+  }
+}
+
+async function handleNudgeMember(taskId, memberName, event) {
+  if (event) event.stopPropagation();
+
+  const comment = `Process Coordinator Nudge: Please update the status of this task or report any blockers.`;
+
+  try {
+    showToast(`Nudging ${memberName}...`);
+    await apiFetch('addTaskComment', {
+      taskId: taskId,
+      user: state.currentUser,
+      text: comment
+    }, 'POST');
+
+    showToast(`Nudge sent to ${memberName}`);
+    // Refresh tasks
+    if (state.currentView === 'tasks') {
+      const res = await apiFetch('getTasks', { user: state.tasksFilterUser, all: !state.tasksFilterUser ? 'true' : 'false' });
+      if (res.success) {
+        state.tasks = res.data;
+        renderTasks(state.tasks);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to nudge:', err);
+    showToast('Failed to send nudge', 'error');
+  }
+}
+
+async function handleViewAllTasks() {
+  state.currentView = 'tasks';
+  state.currentGlobalView = true;
+
+  const dash = $('admin-dashboard-container');
+  if (dash) dash.style.display = 'none';
+  const taskView = $('task-view-container');
+  if (taskView) taskView.style.display = 'block';
+
+  // Show monitoring header
+  const monHeader = $('monitoring-header');
+  if (monHeader) {
+    monHeader.style.display = 'flex';
+    $('monitoring-user-name').textContent = 'Team Overview: All Tasks';
+  }
+
+  $('stats-section').style.display = 'none';
+  $('briefing-section').style.display = 'none';
+
+  const content = $('recurring-section');
+  if (content) content.innerHTML = '<div class="loading-spinner" style="margin: 3rem auto;"></div>';
+
+  try {
+    showToast('Loading all tasks...');
+    const res = await apiFetch('getTasks', { all: 'true' });
+    if (res.success) {
+      state.tasks = res.data;
+      renderTasks(state.tasks);
+      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+      $('tab-tasks')?.classList.add('active');
+    }
+  } catch (err) {
+    console.error('Failed to view all tasks:', err);
+    showToast('Failed to load tasks', 'error');
+  }
+}
+
+async function handleViewMemberTasks(userName) {
+  state.currentView = 'tasks';
+  state.tasksFilterUser = userName;
+  state.currentGlobalView = false;
+
+  const dash = $('admin-dashboard-container');
+  if (dash) dash.style.display = 'none';
+  const taskView = $('task-view-container');
+  if (taskView) taskView.style.display = 'block';
+
+  // Show monitoring header
+  const monHeader = $('monitoring-header');
+  if (monHeader) {
+    monHeader.style.display = 'flex';
+    $('monitoring-user-name').textContent = `Monitoring Tasks: ${userName}`;
+  }
+
+  $('stats-section').style.display = 'none';
+  $('briefing-section').style.display = 'none';
+
+  const content = $('recurring-section');
+  if (content) content.innerHTML = '<div class="loading-spinner" style="margin: 3rem auto;"></div>';
+
+  try {
+    showToast(`Loading tasks for ${userName}...`);
+    const res = await apiFetch('getTasks', { user: userName });
+    if (res.success) {
+      state.tasks = res.data;
+      renderTasks(state.tasks);
+      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+      $('tab-tasks')?.classList.add('active');
+    }
+  } catch (err) {
+    console.error('Failed to view member tasks:', err);
+    showToast('Failed to load tasks', 'error');
+  }
+}
+
+async function handleRemoveMemberPrompt(memberName, event) {
+  if (event) event.stopPropagation();
+
+  if (!confirm(`Are you sure you want to remove ${memberName}? This will deactivate their account.`)) {
+    return;
+  }
+
+  // Security Verification (Math Challenge)
+  const n1 = Math.floor(Math.random() * 9) + 2;
+  const n2 = Math.floor(Math.random() * 9) + 2;
+  const answer = n1 + n2;
+  const userInput = prompt(`Verification Required: What is ${n1} + ${n2}? (Confirming removal of ${memberName})`);
+
+  if (parseInt(userInput) !== answer) {
+    showToast('Incorrect verification answer. Removal cancelled.', 'error');
+    return;
+  }
+
+  try {
+    showToast(`Removing ${memberName}...`);
+    const res = await apiFetch('removeMember', { name: memberName }, 'POST');
+    if (res.success) {
+      showToast(`${memberName} has been removed.`);
+      // Reload dashboard
+      openDashboard();
+    } else {
+      throw new Error(res.error);
+    }
+  } catch (err) {
+    console.error('Failed to remove member:', err);
+    showToast('Failed to remove member: ' + err.message, 'error');
+  }
+}
+
+function handleExitMonitoring() {
+  state.tasksFilterUser = null;
+  state.currentGlobalView = false;
+  $('monitoring-header').style.display = 'none';
+  initForUser(state.currentUser);
+}
+
 function updateSectionCounts() {
   document.querySelectorAll('.task-section').forEach(section => {
     const cards = section.querySelectorAll('.task-card');
@@ -1474,14 +1800,16 @@ async function initForUser(user) {
   renderBriefingSkeleton();
 
   try {
-    // Fetch tasks and stats in parallel
-    const [tasksRes, statsRes] = await Promise.all([
+    // Fetch tasks, stats and team in parallel
+    const [tasksRes, statsRes, teamRes] = await Promise.all([
       apiFetch('getTasks', { user }),
       apiFetch('getScores', { user }),
+      apiFetch('getTeam'),
     ]);
 
     state.tasks = tasksRes.data;
     state.stats = statsRes.data;
+    state.team = teamRes.data;
 
     // Render tasks
     if (state.tasks.length === 0) {
@@ -1731,6 +2059,19 @@ async function handleTaskSubmit(e) {
     };
     if (isEdit) payload.taskId = state.editingTaskId;
 
+    // If it's a member trying to edit, send for approval instead
+    if (isEdit && state.userRole === 'member') {
+      showToast('Edit request sent for approval');
+      await apiFetch('requestTaskChange', {
+        taskId: state.editingTaskId,
+        type: 'edit',
+        newData: payload,
+        requestedBy: state.currentUser
+      }, 'POST');
+      closeAddTaskModal();
+      return;
+    }
+
     const res = await apiFetch(action, payload, 'POST');
 
     if (isEdit) {
@@ -1822,7 +2163,22 @@ async function handleDeleteTask() {
   const taskId = pendingDeleteTaskId;
   closeDeleteConfirm();
 
-  // Optimistic removal from UI
+  if (state.userRole === 'member') {
+    try {
+      showToast('Deletion request sent for approval...');
+      await apiFetch('requestTaskChange', {
+        taskId,
+        type: 'delete',
+        requestedBy: state.currentUser
+      }, 'POST');
+    } catch (err) {
+      console.error('Failed to request deletion:', err);
+      showToast('Request failed', 'error');
+    }
+    return;
+  }
+
+  // Optimistic removal from UI (Admin/Coord only)
   const card = document.querySelector(`[data-task-id="${taskId}"]`);
   if (card) {
     card.style.transition = 'all 0.3s ease';
@@ -2295,11 +2651,23 @@ function bindApprovalEvents() {
   });
   document.querySelectorAll('.reject-member-btn').forEach(btn => {
     btn.onclick = async () => {
-      if (confirm(`Are you sure you want to reject and delete ${btn.dataset.email}?`)) {
-        btn.disabled = true;
-        btn.textContent = '...';
-        await handleReviewMember(btn.dataset.email, 'reject');
+      const email = btn.dataset.email;
+      if (!confirm(`Are you sure you want to reject and delete ${email}?`)) return;
+
+      // Math Challenge
+      const n1 = Math.floor(Math.random() * 9) + 2;
+      const n2 = Math.floor(Math.random() * 9) + 2;
+      const answer = n1 + n2;
+      const userInput = prompt(`Verification Required: What is ${n1} + ${n2}? (Confirming rejection of ${email})`);
+
+      if (parseInt(userInput) !== answer) {
+        showToast('Incorrect verification answer. Rejection cancelled.', 'error');
+        return;
       }
+
+      btn.disabled = true;
+      btn.textContent = '...';
+      await handleReviewMember(email, 'reject');
     };
   });
 }
@@ -2396,6 +2764,23 @@ function openLeaveModal() {
   $('leave-start-date').value = today;
   $('leave-end-date').value = today;
   $('leave-reason').value = '';
+
+  // Populate Buddy list
+  const buddySelect = $('leave-buddy');
+  if (buddySelect) {
+    buddySelect.innerHTML = '<option value="">No Buddy</option>';
+    if (state.team) {
+      state.team
+        .filter(m => m.name !== state.currentUser && m.active)
+        .forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.name;
+          opt.textContent = m.name;
+          buddySelect.appendChild(opt);
+        });
+    }
+  }
+
   $('leave-modal').style.display = 'flex';
 }
 
@@ -2407,6 +2792,7 @@ async function handleLeaveSubmit() {
   const startDate = $('leave-start-date').value;
   const endDate = $('leave-end-date').value;
   const reason = $('leave-reason').value.trim();
+  const taskBuddy = $('leave-buddy').value;
 
   if (!startDate || !endDate) {
     showToast('Please select dates', 'error');
@@ -2418,11 +2804,13 @@ async function handleLeaveSubmit() {
   btn.textContent = 'Submitting...';
 
   try {
+    showToast('Submitting leave request...');
     await apiFetch('requestLeave', {
       user: state.currentUser,
       startDate,
       endDate,
-      reason
+      reason,
+      taskBuddy
     }, 'POST');
 
     showToast('Leave Submitted Successfully! Admin will review it.');
@@ -2822,6 +3210,36 @@ function startBackgroundSync() {
       initForUser(state.currentUser);
     }
   }, 60000); // Sync every 60 seconds
+}
+
+function bindModificationEvents() {
+  document.querySelectorAll('.approve-mod-btn').forEach(btn => {
+    btn.onclick = async () => {
+      const id = parseInt(btn.dataset.id);
+      try {
+        showToast('Processing approval...');
+        await apiFetch('approveTaskChange', { requestId: id, decision: 'approved' }, 'POST');
+        showToast('Task modification approved!');
+        openDashboard(); // Refresh
+      } catch (err) {
+        showToast('Approval failed', 'error');
+      }
+    };
+  });
+
+  document.querySelectorAll('.reject-mod-btn').forEach(btn => {
+    btn.onclick = async () => {
+      const id = parseInt(btn.dataset.id);
+      try {
+        showToast('Rejecting request...');
+        await apiFetch('approveTaskChange', { requestId: id, decision: 'rejected' }, 'POST');
+        showToast('Request rejected');
+        openDashboard(); // Refresh
+      } catch (err) {
+        showToast('Rejection failed', 'error');
+      }
+    };
+  });
 }
 
 // Global Error Handling

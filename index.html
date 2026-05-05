@@ -60,6 +60,7 @@
           <select id="auth-role">
             <option value="member">Member</option>
             <option value="coordinator">Coordinator</option>
+            <option value="process_coordinator">Process Coordinator</option>
             <option value="admin">Admin</option>
           </select>
         </div>
@@ -131,7 +132,7 @@
 
       <div class="header-center" id="header-nav" style="display:none;">
         <button class="nav-tab active" id="tab-my-tasks">My Tasks</button>
-        <button class="nav-tab" id="tab-team">Team</button>
+        <button class="nav-tab" id="tab-team" style="position:relative;">Team <span id="team-badge" style="display:none; position:absolute; top:-5px; right:-5px; background:var(--accent-red); color:white; font-size:0.6rem; padding:2px 5px; border-radius:10px; border:2px solid var(--bg-primary);">!</span></button>
         <button class="nav-tab" id="tab-tests">Test Tracker</button>
       </div>
 
@@ -165,6 +166,15 @@
     </div>
 
     <div id="task-view-container" style="display:none;">
+      <!-- Monitoring Header -->
+      <div id="monitoring-header" class="monitoring-header" style="display:none; margin-bottom: 20px; padding: 15px; border-radius: var(--radius-lg); background: var(--accent-purple-glow); border: 1px solid var(--accent-purple); color: var(--accent-purple); font-weight: 600; display: flex; align-items: center; justify-content: space-between;">
+        <div id="monitoring-title" style="display:flex; align-items:center; gap:10px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          <span id="monitoring-user-name"></span>
+        </div>
+        <button onclick="handleExitMonitoring()" class="btn-sm" style="background:var(--accent-purple); color:white; border:none; border-radius:var(--radius-sm); padding:4px 10px; cursor:pointer;">Exit View</button>
+      </div>
+
       <!-- AI Briefing -->
       <div id="briefing-section" style="display:none;"></div>
 
@@ -177,6 +187,8 @@
           <select id="status-filter">
             <option value="all">All Status</option>
             <option value="pending">Pending</option>
+            <option value="in-progress">In Progress</option>
+            <option value="stuck">Stuck</option>
             <option value="overdue">Overdue</option>
             <option value="done">Completed</option>
           </select>
@@ -420,6 +432,13 @@
       <div class="form-group">
         <label for="leave-reason">Reason (Optional)</label>
         <input type="text" id="leave-reason" placeholder="e.g. Family function, Health...">
+      </div>
+      <div class="form-group">
+        <label for="leave-buddy">Task Buddy (Optional)</label>
+        <select id="leave-buddy">
+          <option value="">No Buddy</option>
+        </select>
+        <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">Buddy will manage your tasks while you are away.</p>
       </div>
       <p class="modal-body-text" style="font-size: 0.75rem; color: var(--accent-amber);">Note: Leave must be approved by Admin to skip task generation.</p>
       <div class="modal-actions">
