@@ -7,7 +7,7 @@
 // =============================================
 const CONFIG = {
   //  REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbxI9YehS3l7nCTDeuRNUXpYIV2E1WXPknebK8VZD_KhjP7Y_LdZNXcv9W-Wbv6JhZTI/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbwJvEi-WxBh56panVUYZYV8Jnw6ZLknmd70aMO50JZ2tPo7J-8vwI_Cy9aJuuMWfgl6/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
@@ -3220,9 +3220,15 @@ function bindModificationEvents() {
         showToast('Processing approval...');
         await apiFetch('approveTaskChange', { requestId: id, decision: 'approved' }, 'POST');
         showToast('Task modification approved!');
-        openDashboard(); // Refresh
+
+        // Refresh everything
+        if (state.currentView === 'tasks') {
+          await fetchTasks();
+        } else {
+          openDashboard();
+        }
       } catch (err) {
-        showToast('Approval failed', 'error');
+        showToast('Approval failed: ' + (err.message || 'Unknown error'), 'error');
       }
     };
   });
@@ -3234,9 +3240,14 @@ function bindModificationEvents() {
         showToast('Rejecting request...');
         await apiFetch('approveTaskChange', { requestId: id, decision: 'rejected' }, 'POST');
         showToast('Request rejected');
-        openDashboard(); // Refresh
+
+        if (state.currentView === 'tasks') {
+          await fetchTasks();
+        } else {
+          openDashboard();
+        }
       } catch (err) {
-        showToast('Rejection failed', 'error');
+        showToast('Rejection failed: ' + (err.message || 'Unknown error'), 'error');
       }
     };
   });
