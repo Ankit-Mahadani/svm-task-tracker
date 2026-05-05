@@ -7,7 +7,7 @@
 // =============================================
 const CONFIG = {
   //  REPLACE THIS with your deployed Apps Script Web App URL
-  API_URL: 'https://script.google.com/macros/s/AKfycbwJvEi-WxBh56panVUYZYV8Jnw6ZLknmd70aMO50JZ2tPo7J-8vwI_Cy9aJuuMWfgl6/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbxc_w6_Tufemb_MFYZreaBvwKvpvAw7KVGm6RZp6KepDGlIyGlDx-87MwV0od9-gi4Y/exec',
 
   // Retry settings
   MAX_RETRIES: 2,
@@ -1142,7 +1142,7 @@ function renderDashboard(scores, pendingMembers = [], leaves = [], perfData = []
                 <div style="display:grid; grid-template-columns: 70px 1fr; gap:6px;">
                   <span>Task:</span> <span style="color:var(--text-primary); font-weight:600;">${m.newData.taskName}</span>
                   <span>Type:</span> <span style="color:var(--text-primary);">${m.newData.taskType}</span>
-                  <span>Due:</span> <span style="color:var(--text-primary);">${m.newData.plannedDate}</span>
+                  <span>Due:</span> <span style="color:var(--text-primary);">${m.newData.plannedDate} ${m.newData.time ? `at ${m.newData.time}` : ''}</span>
                 </div>
               </div>
             ` : `
